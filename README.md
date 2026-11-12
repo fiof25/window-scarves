@@ -38,7 +38,19 @@ Everything is drawn in code. The scarf follows a curved path, its width ripples 
 
 ## Get it
 
-You need macOS 13 or later and Apple's Command Line Tools (`xcode-select --install`). Xcode itself isn't needed.
+Window Scarves needs macOS 13 or later, and runs on Apple Silicon and Intel Macs.
+
+### Download
+
+1. Download **Window-Scarves.zip** from the [latest release](https://github.com/fiof25/window-scarves/releases/latest).
+2. Unzip it and drag **Window Scarves.app** into your Applications folder.
+3. Open it. Look for 🧣 in your menu bar.
+
+The first time you open it, macOS will block it, because the app isn't signed with a paid Apple developer account. To allow it, open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**. You only need to do this once.
+
+### Build it yourself
+
+You need Apple's Command Line Tools (`xcode-select --install`). Xcode itself isn't needed.
 
 ```sh
 git clone https://github.com/fiof25/window-scarves.git
@@ -46,17 +58,11 @@ cd window-scarves
 ./build.sh --install
 ```
 
-This builds a universal app (Apple Silicon and Intel), copies **Window Scarves.app** into `~/Applications`, and opens it. Look for 🧣 in your menu bar.
-
-Run `./build.sh` without `--install` to build into `build/` only.
-
-The app isn't notarized. If macOS blocks it, open **System Settings → Privacy & Security** and choose **Open Anyway**.
+This builds the app, copies **Window Scarves.app** into `~/Applications`, and opens it. Run `./build.sh` without `--install` to build into `build/` only.
 
 ## Make yourself cosy
 
-Press **⌘D** anywhere to turn the scarves off and on.
-
-> ⌘D is a system-wide shortcut, so while Window Scarves is running it replaces ⌘D in other apps (for example Bookmark in browsers and Duplicate in Finder). To use a different key, change the `HotKey(...)` line in `Sources/main.swift`.
+Press **⌃⌥D** (Control-Option-D) anywhere to turn the scarves off and on.
 
 Click 🧣 in the menu bar for the rest:
 
@@ -66,6 +72,8 @@ Click 🧣 in the menu bar for the rest:
 - **Windows**: every window, or only the front one
 - **Apps**: untick an app to leave its windows bare
 - **Buttons on Window Controls**: see below
+- **Keyboard Shortcut ⌃⌥D**: turn the shortcut off if you don't want it
+- **Start at Login**: open Window Scarves automatically when you log in
 
 The scarf stays on the window's top edge, so it never covers the red, yellow and green buttons. If there's no room on screen beside a window, the long end moves to the other side, the short end is left off, and as a last resort the long end tucks just inside the window.
 
@@ -97,7 +105,7 @@ Render the preview images without touching your real windows:
 - Falling leaves drifting past the active window
 - Choosing a scarf for each app by hand
 - More textures: cable knit, bouclé, a blanket scarf
-- A choice of keyboard shortcut in the menu
+- Choosing your own keyboard shortcut
 - A winter collection
 
 ## Credits

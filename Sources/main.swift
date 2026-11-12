@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let settings = Settings.shared
@@ -21,18 +22,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         tracker.start()
 
-        // ⌘D anywhere turns the scarves on and off.
-        hotKey = HotKey(keyCode: kVK_ANSI_D, modifiers: cmdKey) { [weak self] in
-            self?.settings.enabled.toggle()
-        }
-        if hotKey == nil {
-            FileHandle.standardError.write(Data("Window Scarves: couldn't register ⌘D (another app may own it)\n".utf8))
-        }
+        updateHotKey()
 
         // The buttons need to know exactly where each window's real buttons are. Ask once.
         if settings.sewnButtons && !WindowControls.trusted && !settings.askedForAccessibility {
             settings.askedForAccessibility = true
             WindowControls.askForPermission()
+        }
+    }
+
+    /// ⌃⌥D anywhere turns the scarves on and off. (Control-Option-D isn't used by macOS or
+    /// common apps, so it doesn't take a shortcut away from anything else.)
+    private func updateHotKey() {
+        hotKey = nil
+        guard settings.shortcutEnabled else { return }
+        hotKey = HotKey(keyCode: kVK_ANSI_D, modifiers: controlKey | optionKey) { [weak self] in
+            self?.settings.enabled.toggle()
+        }
+        if hotKey == nil {
+            FileHandle.standardError.write(Data("Window Scarves: couldn't register ⌃⌥D (another app may own it)\n".utf8))
         }
     }
 
@@ -46,8 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
 
         let onOff = item(settings.enabled ? "Scarves On" : "Scarves Off", #selector(toggleEnabled),
-                         on: settings.enabled, key: "d")
-        onOff.keyEquivalentModifierMask = .command
+                         on: settings.enabled, key: settings.shortcutEnabled ? "d" : "")
+        onOff.keyEquivalentModifierMask = [.control, .option]
         menu.addItem(onOff)
         menu.addItem(.separator())
 
@@ -96,6 +104,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(fit)
         }
         menu.addItem(.separator())
+        menu.addItem(item("Keyboard Shortcut ⌃⌥D", #selector(toggleShortcut), on: settings.shortcutEnabled))
+        menu.addItem(item("Start at Login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
+        menu.addItem(.separator())
         menu.addItem(item("Quit Window Scarves", #selector(quit), on: false, key: "q"))
     }
 
@@ -114,6 +125,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleEnabled() { settings.enabled.toggle() }
+
+    @objc private func toggleShortcut() {
+        settings.shortcutEnabled.toggle()
+        updateHotKey()
+    }
+
+    @objc private func toggleLogin() {
+        do {
+            if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+            } else {
+                try SMAppService.mainApp.register()
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't change Start at Login"
+            alert.informativeText = "\(error.localizedDescription)\n\nIt works best when Window Scarves is in your Applications folder."
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+    }
     @objc private func toggleButtons() { settings.sewnButtons.toggle() }
     @objc private func lineUpButtons() { WindowControls.askForPermission() }
     @objc private func shuffle() { settings.shuffleAssignments() }

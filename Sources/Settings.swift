@@ -34,6 +34,12 @@ final class Settings {
         set { d.set(newValue, forKey: "frontOnly"); changed() }
     }
 
+    /// Whether the system-wide on/off keyboard shortcut is active.
+    var shortcutEnabled: Bool {
+        get { d.object(forKey: "shortcutEnabled") as? Bool ?? true }
+        set { d.set(newValue, forKey: "shortcutEnabled") }
+    }
+
     /// Cover the red, yellow and green window buttons with sewing buttons.
     var sewnButtons: Bool {
         get { d.object(forKey: "sewnButtons") as? Bool ?? true }
