@@ -24,6 +24,8 @@ final class Tracker {
     private var lastSeen: [CGWindowID: CGRect] = [:]
     private var lastOrder: [CGWindowID] = []
     private var trusted = (value: false, checked: CFTimeInterval(0))
+    /// Newly seen windows, with the frame they had and when they first had it.
+    private var settling: [CGWindowID: (frame: CGRect, since: CFTimeInterval)] = [:]
 
     private static let fastInterval = 1.0 / 120
     private static let idleInterval = 1.0 / 30
@@ -116,6 +118,7 @@ final class Tracker {
         controlsCache.removeAll()
         lastSeen.removeAll()
         lastOrder.removeAll()
+        settling.removeAll()
     }
 
     private struct Target {
@@ -167,6 +170,31 @@ final class Tracker {
         }
     }
 
+    /// Whether a window covers a whole screen: it spans the full width, reaches the bottom, and
+    /// starts at the top (or just below the menu bar or camera notch).
+    private static func fillsScreen(_ r: CGRect, _ screens: [CGRect]) -> Bool {
+        screens.contains {
+            abs(r.minX - $0.minX) < 2 && abs(r.maxX - $0.maxX) < 2 && abs(r.maxY - $0.maxY) < 2
+                && r.minY - $0.minY < 60
+        }
+    }
+
+    /// Whether a window looks like a popover, hover card, sheet or dialog rather than a window
+    /// in its own right: it sits directly on top of a much bigger window from the same app and
+    /// mostly within it. `below` is the windows behind it, front to back.
+    private static func isPopover(_ w: Target, above below: ArraySlice<Target>) -> Bool {
+        let area = w.frame.width * w.frame.height
+        for parent in below {
+            // Only windows of the same app directly beneath count; another app's window in
+            // between means this one stands on its own.
+            guard parent.pid == w.pid else { return false }
+            let overlap = w.frame.intersection(parent.frame)
+            let covered = overlap.isNull ? 0 : overlap.width * overlap.height
+            if area < 0.5 * parent.frame.width * parent.frame.height, covered >= 0.5 * area { return true }
+        }
+        return false
+    }
+
     func refresh() {
         guard settings.enabled else {
             if !overlays.isEmpty { removeAll() }
@@ -178,6 +206,7 @@ final class Tracker {
         let screens = screenRectsCG()
         let skipped = settings.skippedApps
         var index: [CGWindowID: Int] = [:]
+        var sizeable: [Target] = []     // every real-sized app window, front to back
         var targets: [Target] = []
         var apps: Set<String> = []
 
@@ -193,15 +222,39 @@ final class Tracker {
             guard let bounds = w[kCGWindowBounds as String] as? NSDictionary,
                   let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { continue }
             if rect.width < 200 || rect.height < 140 { continue }
-            // Full-screen windows have nowhere to hang a scarf.
-            if screens.contains(where: { abs($0.width - rect.width) < 2 && abs($0.height - rect.height) < 2 }) { continue }
-            apps.insert(owner)
-            if skipped.contains(owner) { continue }
-            targets.append(Target(id: id, frame: rect, owner: owner, pid: pid, index: i))
+            sizeable.append(Target(id: id, frame: rect, owner: owner, pid: pid, index: i))
+        }
+        for (k, w) in sizeable.enumerated() {
+            // A window that fills the screen (full screen, or maximised edge to edge) goes bare.
+            if Tracker.fillsScreen(w.frame, screens) { continue }
+            // So do popovers, hover cards, sheets and dialogs sitting on top of their app's window.
+            if Tracker.isPopover(w, above: sizeable[(k + 1)...]) { continue }
+            apps.insert(w.owner)
+            if skipped.contains(w.owner) { continue }
+            targets.append(w)
         }
         recentApps.formUnion(apps)
 
         if settings.frontOnly { targets = Array(targets.prefix(1)) }
+
+        // A window that has only just appeared may still be animating open, and macOS reports
+        // it at the wrong size while it does. Wait until it has held still for a moment before
+        // giving it a scarf, so the scarf is made once, for the right size.
+        let clock = CACurrentMediaTime()
+        targets = targets.filter { t in
+            if overlays[t.id] != nil { return true }
+            if let first = settling[t.id], first.frame == t.frame {
+                if clock - first.since >= 0.18 {
+                    settling[t.id] = nil
+                    return true
+                }
+            } else {
+                settling[t.id] = (t.frame, clock)
+            }
+            stayFast(0.3)
+            return false
+        }
+        if settling.count > 64 { settling.removeAll() }
 
         // If any window moved, resized, appeared, vanished or changed order, keep watching closely.
         let seen = Dictionary(uniqueKeysWithValues: targets.map { ($0.id, $0.frame) })
@@ -224,7 +277,6 @@ final class Tracker {
 
         let thickness = settings.thickness.points
         let visible = visibleRectsCG()
-        let clock = CACurrentMediaTime()
         for t in targets {
             let overlay = overlays[t.id] ?? {
                 let o = ScarfOverlay(targetID: t.id)

@@ -4,13 +4,13 @@ A little macOS menu-bar app that gives each of your windows a cosy scarf for aut
 
 Each window wears one soft scarf that hugs it like a neck: a short end hangs down one side, the scarf runs along the top edge, wraps over the corner, and the long end hangs down the other side. Every app gets a different scarf from the collection.
 
-![Four windows, each wearing a different scarf: a lilac mohair check, an oatmeal rib knit, a red fine knit and a cocoa check](docs/hero.png)
+![Four windows, each wearing a different scarf: a lilac mohair check, a cream cable knit, a red fine knit and a cocoa check](docs/hero.png)
 
 ## The collection
 
-Eight scarves in three textures, each with its own fringe.
+Seven scarves in four textures, each with its own fringe.
 
-![All eight scarves](docs/colourways.png)
+![All seven scarves](docs/colourways.png)
 
 **Brushed mohair** (fuzzy, no visible stitches, long fine fringe)
 
@@ -19,19 +19,21 @@ Eight scarves in three textures, each with its own fringe.
 - **Moss Check**: moss, butter and navy
 - **Blush**: solid powder pink
 
+**Cable knit** (three slim twisted cables, short tassels)
+
+- **Cream Cable**: bright, soft cream
+
 **Chunky rib knit** (fat stitches, short tassels)
 
-- **Oat Milk**: heathered oatmeal
 - **Camel**: warm camel
 
 **Fine knit** (little V stitches, wispy fringe)
 
 - **Rosehip**: solid soft red
-- **Varsity Stripe**: a skinny scarf in navy and cream with a rust thread
 
 **Mixed** (the default) gives each app a different scarf and remembers it. **Shuffle** deals them out again.
 
-Everything is drawn in code. The scarf follows a curved path, its width ripples a little like real fabric, the checks blend where colours cross, and each texture has its own fuzzy halo.
+Everything is drawn in code. The scarf follows a curved path, its width ripples a little like real fabric, the checks blend where colours cross, the cables really do cross over and under, and each texture has its own fuzzy halo.
 
 ![Close-up of the lilac mohair check](docs/close-up.png)
 
@@ -76,6 +78,8 @@ Click 🧣 in the menu bar for the rest:
 - **Buttons on Window Controls**: see below
 - **Keyboard Shortcuts**: turn both shortcuts off if you don't want them
 - **Start at Login**: open Window Scarves automatically when you log in
+
+Not every window gets one. A window that fills the whole screen goes bare, and so do popovers, hover cards, sheets and dialogs that sit on top of another window.
 
 The scarf stays on the window's top edge, so it never covers the red, yellow and green buttons. If there's no room on screen beside a window, the long end moves to the other side, the short end is left off, and as a last resort the long end tucks just inside the window.
 

@@ -200,8 +200,8 @@ if let i = args.firstIndex(of: "--render"), i + 1 < args.count {
     let ok = Catalogue.hero(to: dir + "/hero.png")
         && Catalogue.swatches(to: dir + "/colourways.png")
         && Catalogue.closeUp(to: dir + "/close-up.png", colourway: Colourways.lilacCheck)
-        && Catalogue.closeUp(to: dir + "/close-up-rib.png", colourway: Colourways.oatMilk)
-        && Catalogue.closeUp(to: dir + "/close-up-knit.png", colourway: Colourways.varsityStripe)
+        && Catalogue.closeUp(to: dir + "/close-up-rib.png", colourway: Colourways.creamCable)
+        && Catalogue.closeUp(to: dir + "/close-up-knit.png", colourway: Colourways.rosehip)
         && Catalogue.closeUp(to: dir + "/close-up-tucked.png", colourway: Colourways.cocoaCheck,
                              fit: ScarfFit(tuck: 0.9 * 43, shortEnd: false))
     print(ok ? "Rendered previews into \(dir)" : "Rendering failed")

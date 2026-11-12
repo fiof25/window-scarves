@@ -56,13 +56,16 @@ enum Texture {
     case rib
     /// Brushed mohair weave: no visible stitches, soft blended colour and lots of fuzz.
     case mohair
+    /// Cable knit: three slim twisted rope cables side by side, with grooves between them.
+    case cable
 
-    /// Stitches (or woven cells) across the scarf's width.
+    /// Stitches (or brushed cells) across the scarf's width.
     var across: Int {
         switch self {
         case .knit: return 7
         case .rib: return 5
         case .mohair: return 9
+        case .cable: return 16
         }
     }
 
@@ -72,6 +75,7 @@ enum Texture {
         case .knit: return 0.8
         case .rib: return 0.62
         case .mohair: return 1.0
+        case .cable: return 0.78
         }
     }
 }
@@ -109,9 +113,12 @@ struct Colourway {
         case .knit: return base.shade(0.74)
         case .rib: return base.shade(0.7)
         case .mohair: return base.shade(0.96)   // brushed fabric has no dark gaps
+        case .cable: return base.mix(warmShadow, 0.5)   // warm, so pale yarn looks clean rather than grey
         }
     }
     var fuzz: Yarn { base.lighten(0.42) }
+    /// The tone that cable knit shades towards: a warm tan rather than grey.
+    var warmShadow: Yarn { base.mix(Yarn(0xC9B28A), 0.55) }
 }
 
 /// A soft woven check: lengthwise and crosswise bands of colour that blend where they cross.
@@ -141,11 +148,11 @@ enum Colourways {
                       warp: [(0.36, 0), (0.7, 1), (0.84, 2), (1.01, 0)],
                       weft: [(9, 0), (8, 1), (3, 2), (8, 1)]))
 
-    static let oatMilk = Colourway(
-        id: "oat-milk", name: "Oat Milk",
-        blurb: "chunky rib knit in heathered oatmeal",
-        texture: .rib, base: Yarn(0xDCCFBA), weight: 1.04, heather: 0.07, fringe: .chunky
-    ) { _, _, _, _ in Yarn(0xDCCFBA) }
+    static let creamCable = Colourway(
+        id: "cream-cable", name: "Cream Cable",
+        blurb: "fine cable knit in bright, soft cream",
+        texture: .cable, base: Yarn(0xF6EFE0), weight: 1.08, heather: 0.025, fringe: .chunky
+    ) { _, _, _, _ in Yarn(0xF6EFE0) }
 
     static let rosehip = Colourway(
         id: "rosehip", name: "Rosehip",
@@ -181,21 +188,9 @@ enum Colourways {
         texture: .mohair, base: Yarn(0xE9C0C7), weight: 1.06, heather: 0.07, fringe: .long
     ) { i, _, _, _ in Yarn(0xE9C0C7).shade(pmod(i, 2) == 0 ? 1 : 0.975) }
 
-    static let varsityStripe = Colourway(
-        id: "varsity-stripe", name: "Varsity Stripe",
-        blurb: "skinny fine knit in navy and cream with a rust thread",
-        texture: .knit, base: Yarn(0x2F3B57), weight: 0.86, heather: 0.05, fringe: .wispy
-    ) { i, _, _, _ in
-        let m = pmod(i, 22)
-        if m < 10 { return Yarn(0x2F3B57) }
-        if m < 14 { return cream }
-        if m < 16 { return Yarn(0xB95D3D) }
-        return cream
-    }
-
     /// Ordered so that the first few apps get a mix of textures.
     static let all: [Colourway] = [
-        lilacCheck, oatMilk, rosehip, cocoaCheck, camel, mossCheck, blush, varsityStripe,
+        lilacCheck, creamCable, rosehip, cocoaCheck, camel, mossCheck, blush,
     ]
 
     /// Setting value meaning "give each app its own scarf".

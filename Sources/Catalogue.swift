@@ -100,7 +100,7 @@ enum Catalogue {
     }
 
     static func background(_ ctx: CGContext, _ size: CGSize) {
-        let colors = [Yarn(0xFDF3E3).cg, Yarn(0xF6E2C6).cg] as CFArray
+        let colors = [Yarn(0x355443).cg, Yarn(0x263E31).cg] as CFArray
         if let g = CGGradient(colorsSpace: Knit.sRGB, colors: colors, locations: [0, 1]) {
             ctx.drawLinearGradient(g, start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
         }
@@ -119,7 +119,7 @@ enum Catalogue {
         let T: CGFloat = 34
         let windows = [
             MockWindow(frame: CGRect(x: 110, y: 120, width: 640, height: 430), colourway: Colourways.lilacCheck, side: .right),
-            MockWindow(frame: CGRect(x: 880, y: 100, width: 500, height: 360), colourway: Colourways.oatMilk, side: .left),
+            MockWindow(frame: CGRect(x: 880, y: 100, width: 500, height: 360), colourway: Colourways.creamCable, side: .left),
             MockWindow(frame: CGRect(x: 330, y: 470, width: 560, height: 370), colourway: Colourways.rosehip, side: .right),
             MockWindow(frame: CGRect(x: 960, y: 540, width: 420, height: 300), colourway: Colourways.cocoaCheck, side: .right),
         ]
@@ -149,9 +149,9 @@ enum Catalogue {
                 drawMockWindow(ctx, r)
                 drawScarf(ctx, on: r, colourway: cw, side: .right, T: 28, scale: scale)
                 drawText(ctx, cw.name, at: CGPoint(x: ox + 50, y: oy + 306), size: 17, weight: .semibold,
-                         colour: Yarn(0x4A2E1E))
+                         colour: Yarn(0xF8EEDC))
                 drawText(ctx, cw.blurb, at: CGPoint(x: ox + 50, y: oy + 328), size: 12.5, weight: .regular,
-                         colour: Yarn(0x7A5A44))
+                         colour: Yarn(0xBFD0BF))
             }
         }) else { return false }
         return write(img, to: path)

@@ -128,21 +128,76 @@ enum Knit {
     static func black(_ a: CGFloat) -> CGColor { CGColor(srgbRed: 0, green: 0, blue: 0, alpha: a) }
 
     /// One knit stitch: a soft V whose point faces along the context's +y axis.
-    private static func vStitch(_ ctx: CGContext, sw: CGFloat, sh: CGFloat, yarn: Yarn, contrast: CGFloat) {
+    private static func vStitch(_ ctx: CGContext, sw: CGFloat, sh: CGFloat, yarn: Yarn, contrast: CGFloat,
+                                shadow: Yarn? = nil, shine showShine: Bool = true) {
         let ew = 0.6 * sw, eh = 1.42 * sh
         let outer = CGRect(x: -ew / 2, y: -eh / 2, width: ew, height: eh)
         let inner = CGRect(x: -ew * 0.37, y: -eh * 0.46, width: ew * 0.74, height: eh * 0.84)
         let shine = CGRect(x: -ew * 0.18, y: -eh * 0.38, width: ew * 0.3, height: eh * 0.4)
-        let dark = yarn.shade(1 - 0.14 * contrast).cg, mid = yarn.cg, light = yarn.lighten(0.13 * contrast).cg
+        // The rim of each stitch: normally a darker shade, or a blend towards a given shadow tone.
+        let rim = shadow.map { yarn.mix($0, 0.5 * contrast) } ?? yarn.shade(1 - 0.14 * contrast)
+        let dark = rim.cg, mid = yarn.cg, light = yarn.lighten(0.13 * contrast).cg
         for side in [-1.0, 1.0] as [CGFloat] {
             ctx.saveGState()
             ctx.translateBy(x: side * 0.23 * sw, y: 0)
             ctx.rotate(by: side * 0.5)
             ctx.setFillColor(dark); ctx.fillEllipse(in: outer)
             ctx.setFillColor(mid); ctx.fillEllipse(in: inner)
-            ctx.setFillColor(light); ctx.fillEllipse(in: shine)
+            if showShine { ctx.setFillColor(light); ctx.fillEllipse(in: shine) }
             ctx.restoreGState()
         }
+    }
+
+    /// One stitch in a row: which column's colour it takes, where it sits across the scarf
+    /// (in stitch widths from the edge), how far it leans, and how brightly it's lit.
+    private struct Slot {
+        enum Kind { case plain, purl, over }
+        var j: Int
+        var x: CGFloat
+        var lean: CGFloat = 0
+        var shade: CGFloat = 1
+        /// How far the stitch is tinted towards the scarf's warm shadow tone (0 = not at all).
+        var tint: CGFloat = 0
+        var kind: Kind = .plain
+    }
+
+    /// The stitches in one row of cable knit: three slim rope cables, each four stitches wide,
+    /// with a narrow groove either side of each. In every cable the two strands keep crossing:
+    /// one pair travels across over the top while the other travels back underneath. The middle
+    /// cable twists the opposite way, and the crossings are staggered, like a hand-knit Aran.
+    private static func cableRow(_ r: Int, sw: CGFloat, sh: CGFloat) -> [Slot] {
+        let period = 8
+        let groove: CGFloat = 0.6, stitch: CGFloat = 1.1          // widths, in average stitch widths
+        let total = 4 * groove + 12 * stitch
+        let unit = 16 / total                                      // so the row spans the full width
+        var row: [Slot] = []
+        var under: [Slot] = [], over: [Slot] = []
+        var x: CGFloat = 0
+        for cable in 0..<3 {
+            row.append(Slot(j: cable * 5, x: (x + groove / 2) * unit, tint: 0.45, kind: .purl))
+            x += groove
+            let phase = CGFloat(pmod(r + cable * 3, period)) / CGFloat(period)
+            let t = min(max((phase - 0.15) / 0.7, 0), 1)
+            let crossed = t * t * (3 - 2 * t)                               // 0 → 1 through the crossing
+            let slope = 2 * stitch * (6 * t * (1 - t) / 0.7) / CGFloat(period)   // sideways per row
+            let lean = atan(slope * unit * sw / sh)
+            let mirrored = cable == 1
+            for k in 0..<2 {
+                // One pair starts on the near side and crosses over the top; the other starts on
+                // the far side and crosses back underneath, in shadow where it passes below.
+                let near = (CGFloat(k) + 0.5) * stitch + 2 * stitch * crossed
+                let far = (CGFloat(k) + 2.5) * stitch - 2 * stitch * crossed
+                let top = mirrored ? 4 * stitch - near : near
+                let bottom = mirrored ? 4 * stitch - far : far
+                let j = cable * 5 + 1 + k
+                over.append(Slot(j: j, x: (x + top) * unit, lean: mirrored ? lean : -lean, shade: 1.04, kind: .over))
+                under.append(Slot(j: j + 2, x: (x + bottom) * unit, lean: mirrored ? -lean : lean,
+                                  tint: 0.55 * sin(.pi * t)))
+            }
+            x += 4 * stitch
+        }
+        row.append(Slot(j: 15, x: (x + groove / 2) * unit, tint: 0.45, kind: .purl))
+        return row + under + over
     }
 
     /// Make a whole scarf along `tube`. Only the part near `visible` is drawn, so the same
@@ -172,25 +227,31 @@ enum Knit {
         let rows = Int(ceil(tube.length / sh))
         // Brushed fibres are collected and drawn over the stitches.
         var wisps: [(CGPoint, CGPoint, Yarn)] = []
+        let plain = (0..<n).map { Slot(j: $0, x: CGFloat($0) + 0.5) }
+        // A cable's top strand is drawn in a second pass, so it always lies over the one beneath.
+        for pass in 0..<(texture == .cable ? 2 : 1) {
         for r in -1...(rows + 1) {
             let s = (CGFloat(r) + 0.5) * sh
             let q = tube.at(s)
             guard near.contains(q.p) else { continue }
             let nv = q.n, W = width(s), sw = W / CGFloat(n)
             let angle = atan2(-q.t.dx, q.t.dy)
-            for j in 0..<n {
-                let u = (CGFloat(j) + 0.5) / CGFloat(n) * 2 - 1
+            let slots = texture == .cable ? cableRow(r, sw: sw, sh: sh).filter { ($0.kind == .over) == (pass == 1) } : plain
+            for slot in slots {
+                let j = slot.j
+                let u = slot.x / CGFloat(n) * 2 - 1
                 let a = u * W / 2
                 // Flat, soft fabric: barely darker at the edges, with slanting ripples.
                 let ripple = 0.05 * sin(2 * .pi * (s + 0.9 * a) / (2.3 * base))
                     + 0.028 * sin(2 * .pi * (s - 0.5 * a) / (0.9 * base) + 2)
                 let light = 1.03 - 0.09 * u * u - 0.03 * u * nv.dy + ripple
                 let grain = 1 - cw.heather / 2 + cw.heather * noise01(r, j, 17)
-                let y = colour(r, j).shade(light * grain)
+                var y = colour(r, j).shade(light * grain * slot.shade)
+                if slot.tint > 0 { y = y.mix(cw.warmShadow, slot.tint) }
                 let c = CGPoint(x: q.p.x + nv.dx * a, y: q.p.y + nv.dy * a)
                 ctx.saveGState()
                 ctx.translateBy(x: c.x, y: c.y)
-                ctx.rotate(by: angle)
+                ctx.rotate(by: angle + slot.lean)
                 switch texture {
                 case .knit:
                     vStitch(ctx, sw: sw, sh: sh, yarn: y, contrast: 1)
@@ -203,6 +264,21 @@ enum Knit {
                     ctx.fillEllipse(in: CGRect(x: -sw * 0.8, y: -sh * 1.1, width: sw * 1.6, height: sh * 2.2))
                     ctx.setFillColor(y.lighten(0.1).cg(alpha: 0.35))
                     ctx.fillEllipse(in: CGRect(x: -sw * 0.4, y: -sh * 0.5, width: sw * 0.5, height: sh * 0.7))
+                case .cable:
+                    if slot.kind == .purl {
+                        // A small bump down in the groove beside the cable.
+                        ctx.setFillColor(y.cg)
+                        ctx.fillEllipse(in: CGRect(x: -sw * 0.34, y: -sh * 0.3, width: sw * 0.68, height: sh * 0.6))
+                    } else {
+                        if slot.kind == .over {
+                            // A soft warm shadow under the strand that crosses on top.
+                            ctx.setFillColor(cw.warmShadow.shade(0.82).cg(alpha: 0.28))
+                            ctx.fillEllipse(in: CGRect(x: -sw * 0.75, y: -sh * 0.35, width: sw * 1.5, height: sh * 1.9))
+                        }
+                        // These stitches are too fine for a highlight to show, so it's skipped.
+                        vStitch(ctx, sw: sw * 1.12, sh: sh * 1.14, yarn: y, contrast: 0.85, shadow: cw.warmShadow,
+                                shine: false)
+                    }
                 }
                 ctx.restoreGState()
 
@@ -219,6 +295,7 @@ enum Knit {
                     wisps.append((from, CGPoint(x: from.x + cos(dir) * len, y: from.y + sin(dir) * len), y))
                 }
             }
+        }
         }
         ctx.setLineCap(.round)
         ctx.setLineWidth(0.5)
