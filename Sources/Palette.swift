@@ -114,11 +114,6 @@ struct Colourway {
     var fuzz: Yarn { base.lighten(0.42) }
 }
 
-/// Two stripes just above the fringe, like a classic scarf.
-private func endStripes(_ fromEnd: Int) -> Bool {
-    [3, 4, 7, 8].contains(fromEnd)
-}
-
 /// A soft woven check: lengthwise and crosswise bands of colour that blend where they cross.
 private func check(_ yarns: [Yarn], warp: [(CGFloat, Int)], weft: [(Int, Int)])
     -> (Int, Int, Int, Int) -> Yarn {
@@ -172,12 +167,6 @@ enum Colourways {
         texture: .rib, base: Yarn(0xC59C6C), weight: 1.04, heather: 0.06, fringe: .chunky
     ) { _, _, _, _ in Yarn(0xC59C6C) }
 
-    static let heatherGrey = Colourway(
-        id: "heather-grey", name: "Heather Grey",
-        blurb: "fine knit in grey melange with charcoal stripes at the ends",
-        texture: .knit, base: Yarn(0xABACB1), weight: 1, heather: 0.13, fringe: .wispy
-    ) { _, _, _, fromEnd in endStripes(fromEnd) ? Yarn(0x5A5B62) : Yarn(0xABACB1) }
-
     static let mossCheck = Colourway(
         id: "moss-check", name: "Moss Check",
         blurb: "fuzzy mohair check in moss, butter and navy",
@@ -206,7 +195,7 @@ enum Colourways {
 
     /// Ordered so that the first few apps get a mix of textures.
     static let all: [Colourway] = [
-        lilacCheck, oatMilk, rosehip, cocoaCheck, camel, heatherGrey, mossCheck, blush, varsityStripe,
+        lilacCheck, oatMilk, rosehip, cocoaCheck, camel, mossCheck, blush, varsityStripe,
     ]
 
     /// Setting value meaning "give each app its own scarf".

@@ -40,9 +40,9 @@ final class Settings {
         set { d.set(newValue, forKey: "shortcutEnabled") }
     }
 
-    /// Cover the red, yellow and green window buttons with sewing buttons.
+    /// Cover the red, yellow and green window buttons with sewing buttons. Off until asked for.
     var sewnButtons: Bool {
-        get { d.object(forKey: "sewnButtons") as? Bool ?? true }
+        get { d.bool(forKey: "sewnButtons") }
         set { d.set(newValue, forKey: "sewnButtons"); changed() }
     }
 
@@ -62,12 +62,6 @@ final class Settings {
     func shuffleAssignments() {
         assignments = [:]
         changed()
-    }
-
-    /// Whether the app has already asked for Accessibility access once.
-    var askedForAccessibility: Bool {
-        get { d.bool(forKey: "askedForAccessibility") }
-        set { d.set(newValue, forKey: "askedForAccessibility") }
     }
 
     func colourway(forApp app: String) -> Colourway {

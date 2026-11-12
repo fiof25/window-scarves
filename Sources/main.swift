@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let tracker = Tracker()
     private var statusItem: NSStatusItem!
     private var hotKey: HotKey?
+    private var buttonsHotKey: HotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -24,23 +25,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         updateHotKey()
 
-        // The buttons need to know exactly where each window's real buttons are. Ask once.
-        if settings.sewnButtons && !WindowControls.trusted && !settings.askedForAccessibility {
-            settings.askedForAccessibility = true
-            WindowControls.askForPermission()
-        }
+
     }
 
-    /// ⌃⌥D anywhere turns the scarves on and off. (Control-Option-D isn't used by macOS or
-    /// common apps, so it doesn't take a shortcut away from anything else.)
+    /// ⌃⌥D anywhere turns the scarves on and off; ⌃⌥B does the same for the sewing buttons.
+    /// (Control-Option isn't used with these keys by macOS or common apps, so the shortcuts
+    /// don't take anything away from other apps.)
     private func updateHotKey() {
         hotKey = nil
+        buttonsHotKey = nil
         guard settings.shortcutEnabled else { return }
         hotKey = HotKey(keyCode: kVK_ANSI_D, modifiers: controlKey | optionKey) { [weak self] in
             self?.settings.enabled.toggle()
         }
-        if hotKey == nil {
-            FileHandle.standardError.write(Data("Window Scarves: couldn't register ⌃⌥D (another app may own it)\n".utf8))
+        buttonsHotKey = HotKey(keyCode: kVK_ANSI_B, modifiers: controlKey | optionKey) { [weak self] in
+            self?.toggleButtons()
+        }
+        if hotKey == nil || buttonsHotKey == nil {
+            FileHandle.standardError.write(Data("Window Scarves: couldn't register a shortcut (another app may own it)\n".utf8))
         }
     }
 
@@ -97,14 +99,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if apps.items.isEmpty { apps.addItem(NSMenuItem(title: "No windows yet", action: nil, keyEquivalent: "")) }
         menu.addItem(submenu("Apps", apps))
 
-        menu.addItem(item("Buttons on Window Controls", #selector(toggleButtons), on: settings.sewnButtons))
+        let buttons = item("Buttons on Window Controls", #selector(toggleButtons), on: settings.sewnButtons,
+                           key: settings.shortcutEnabled ? "b" : "")
+        buttons.keyEquivalentModifierMask = [.control, .option]
+        menu.addItem(buttons)
         if settings.sewnButtons && !WindowControls.trusted {
             let fit = item("Buttons Need Accessibility Access — Turn On…", #selector(lineUpButtons), on: false)
             fit.toolTip = "Lets Window Scarves see exactly where each window's buttons are"
             menu.addItem(fit)
         }
         menu.addItem(.separator())
-        menu.addItem(item("Keyboard Shortcut ⌃⌥D", #selector(toggleShortcut), on: settings.shortcutEnabled))
+        menu.addItem(item("Keyboard Shortcuts", #selector(toggleShortcut), on: settings.shortcutEnabled))
         menu.addItem(item("Start at Login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
         menu.addItem(.separator())
         menu.addItem(item("Quit Window Scarves", #selector(quit), on: false, key: "q"))
@@ -146,7 +151,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             alert.runModal()
         }
     }
-    @objc private func toggleButtons() { settings.sewnButtons.toggle() }
+    /// Turn the sewing buttons on or off. Turning them on asks for Accessibility access if the
+    /// app doesn't have it yet, because that's the only way to find each window's real buttons.
+    @objc private func toggleButtons() {
+        settings.sewnButtons.toggle()
+        if settings.sewnButtons && !WindowControls.trusted { WindowControls.askForPermission() }
+    }
     @objc private func lineUpButtons() { WindowControls.askForPermission() }
     @objc private func shuffle() { settings.shuffleAssignments() }
     @objc private func quit() { NSApp.terminate(nil) }
@@ -184,7 +194,7 @@ if let i = args.firstIndex(of: "--render"), i + 1 < args.count {
         && Catalogue.swatches(to: dir + "/colourways.png")
         && Catalogue.closeUp(to: dir + "/close-up.png", colourway: Colourways.lilacCheck)
         && Catalogue.closeUp(to: dir + "/close-up-rib.png", colourway: Colourways.oatMilk)
-        && Catalogue.closeUp(to: dir + "/close-up-knit.png", colourway: Colourways.heatherGrey)
+        && Catalogue.closeUp(to: dir + "/close-up-knit.png", colourway: Colourways.varsityStripe)
         && Catalogue.closeUp(to: dir + "/close-up-tucked.png", colourway: Colourways.cocoaCheck,
                              fit: ScarfFit(tuck: 0.9 * 43, shortEnd: false))
     print(ok ? "Rendered previews into \(dir)" : "Rendering failed")

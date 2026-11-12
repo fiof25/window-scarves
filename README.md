@@ -8,9 +8,9 @@ Each window wears one soft scarf that hugs it like a neck: a short end hangs dow
 
 ## The collection
 
-Nine scarves in three textures, each with its own fringe.
+Eight scarves in three textures, each with its own fringe.
 
-![All nine scarves](docs/colourways.png)
+![All eight scarves](docs/colourways.png)
 
 **Brushed mohair** (fuzzy, no visible stitches, long fine fringe)
 
@@ -27,7 +27,6 @@ Nine scarves in three textures, each with its own fringe.
 **Fine knit** (little V stitches, wispy fringe)
 
 - **Rosehip**: solid soft red
-- **Heather Grey**: grey melange with charcoal stripes at the ends
 - **Varsity Stripe**: a skinny scarf in navy and cream with a rust thread
 
 **Mixed** (the default) gives each app a different scarf and remembers it. **Shuffle** deals them out again.
@@ -62,7 +61,10 @@ This builds the app, copies **Window Scarves.app** into `~/Applications`, and op
 
 ## Make yourself cosy
 
-Press **⌃⌥D** (Control-Option-D) anywhere to turn the scarves off and on.
+Two shortcuts work anywhere:
+
+- **⌃⌥D** (Control-Option-D) turns the scarves off and on
+- **⌃⌥B** (Control-Option-B) turns the sewing buttons off and on
 
 Click 🧣 in the menu bar for the rest:
 
@@ -72,18 +74,18 @@ Click 🧣 in the menu bar for the rest:
 - **Windows**: every window, or only the front one
 - **Apps**: untick an app to leave its windows bare
 - **Buttons on Window Controls**: see below
-- **Keyboard Shortcut ⌃⌥D**: turn the shortcut off if you don't want it
+- **Keyboard Shortcuts**: turn both shortcuts off if you don't want them
 - **Start at Login**: open Window Scarves automatically when you log in
 
 The scarf stays on the window's top edge, so it never covers the red, yellow and green buttons. If there's no room on screen beside a window, the long end moves to the other side, the short end is left off, and as a last resort the long end tucks just inside the window.
 
 ### The buttons
 
-Window Scarves can turn each window's red, yellow and green buttons into little sewing buttons. They're only pictures: clicks pass straight through to the real buttons underneath.
+Press **⌃⌥B** (or choose **Buttons on Window Controls** in the menu) to turn each window's red, yellow and green buttons into little sewing buttons. They're off until you turn them on. They're only pictures: clicks pass straight through to the real buttons underneath.
 
-This needs Accessibility permission. Where those buttons sit differs from app to app (16 points in on plain windows, 26 on windows with toolbars, and anywhere at all in apps that draw their own title bars), so the only way to place a sewing button exactly on top is to ask the window, and macOS only allows that with permission. The app asks once when it first opens, and there's a menu item to ask again. Without permission the scarves work as normal and no sewing buttons are drawn. The permission is only used for this.
+This needs Accessibility permission, and the app asks for it the first time you turn the buttons on. Where those buttons sit differs from app to app (16 points in on plain windows, 26 on windows with toolbars, and anywhere at all in apps that draw their own title bars), so the only way to place a sewing button exactly on top is to ask the window, and macOS only allows that with permission. Without it, no sewing buttons are drawn. The scarves never need it. The permission is only used for this.
 
-The app is ad-hoc signed, so macOS treats each new build as a different app. After rebuilding, switch Window Scarves off and on again under **System Settings → Privacy & Security → Accessibility**.
+If you build the app yourself: it's ad-hoc signed, so macOS treats each new build as a different app. After rebuilding, switch Window Scarves off and on again under **System Settings → Privacy & Security → Accessibility**.
 
 ## How it works
 
