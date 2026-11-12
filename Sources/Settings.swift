@@ -40,12 +40,6 @@ final class Settings {
         set { d.set(newValue, forKey: "shortcutEnabled") }
     }
 
-    /// Cover the red, yellow and green window buttons with sewing buttons. Off until asked for.
-    var sewnButtons: Bool {
-        get { d.bool(forKey: "sewnButtons") }
-        set { d.set(newValue, forKey: "sewnButtons"); changed() }
-    }
-
     /// Apps whose windows go without a scarf.
     var skippedApps: Set<String> {
         get { Set(d.stringArray(forKey: "skippedApps") ?? []) }

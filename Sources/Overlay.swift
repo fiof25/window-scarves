@@ -26,10 +26,6 @@ final class ScarfOverlay {
     private let root = CALayer()
     /// Everything visible, so it can be faded as one.
     private let content = CALayer()
-    /// Holds the sewn-on buttons, always above the scarf.
-    private let buttonRoot = CALayer()
-    private var buttonLayers: [CALayer] = []
-    private var controls: WindowControls.Controls?
     private var layers: [CALayer] = []
     private var placements: [Placement] = []
     private(set) var style: ScarfStyle?
@@ -67,20 +63,14 @@ final class ScarfOverlay {
         window.contentView = view
         content.opacity = 0
         root.addSublayer(content)
-        content.addSublayer(buttonRoot)
     }
 
     deinit { window.orderOut(nil) }
 
     /// Follow the target window. `frame` is in global CoreGraphics coordinates (top-left origin).
-    func update(frame: CGRect, colourway cw: Colourway, style newStyle: ScarfStyle,
-                controls newControls: WindowControls.Controls?) {
+    func update(frame: CGRect, colourway cw: Colourway, style newStyle: ScarfStyle) {
         targetFrame = frame
         colourway = cw
-        if newControls != controls {
-            controls = newControls
-            rebuildButtons()
-        }
         if newStyle != style {
             // A different scarf or a different drape: the old pictures don't fit the new shape,
             // so fade out and come back once the new ones are knitted.
@@ -131,34 +121,6 @@ final class ScarfOverlay {
         content.add(fade, forKey: "fade")
     }
 
-    private func rebuildButtons() {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        buttonLayers.forEach { $0.removeFromSuperlayer() }
-        buttonLayers = []
-        if let controls {
-            let d = (controls.diameter + 1).rounded()
-            let pad = SewnButtons.padding(d)
-            for k in controls.centres.indices {
-                let l = CALayer()
-                l.contents = SewnButtons.image(k, diameter: d, scale: scale)
-                l.contentsScale = scale
-                l.bounds = CGRect(x: 0, y: 0, width: d + 2 * pad, height: d + 2 * pad)
-                buttonRoot.addSublayer(l)
-                buttonLayers.append(l)
-            }
-        }
-        positionButtons()
-        CATransaction.commit()
-    }
-
-    private func positionButtons() {
-        guard let controls else { return }
-        for (l, c) in zip(buttonLayers, controls.centres) {
-            l.position = CGPoint(x: c.x - extents.minX, y: extents.height - (c.y - extents.minY))
-        }
-    }
-
     /// Work out where each piece of the scarf goes for this window size, and move the layers there.
     private func layout(size: CGSize, style newStyle: ScarfStyle) {
         style = newStyle
@@ -176,7 +138,7 @@ final class ScarfOverlay {
                 l.contentsGravity = .resize
                 l.minificationFilter = .trilinear
                 l.anchorPoint = CGPoint(x: 0, y: 1)
-                content.insertSublayer(l, below: buttonRoot)
+                content.addSublayer(l)
                 return l
             }
         }
@@ -186,7 +148,6 @@ final class ScarfOverlay {
             l.bounds = CGRect(origin: .zero, size: p.size)
             l.position = CGPoint(x: p.origin.x - extents.minX, y: H - (p.origin.y - extents.minY))
         }
-        positionButtons()
         CATransaction.commit()
     }
 
@@ -260,7 +221,6 @@ final class ScarfOverlay {
             CATransaction.setDisableActions(true)
             root.frame = bounds
             content.frame = bounds
-            buttonRoot.frame = bounds
             CATransaction.commit()
         }
     }

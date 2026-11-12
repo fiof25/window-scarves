@@ -38,10 +38,7 @@ This builds the app, copies **Window Scarves.app** into `~/Applications`, and op
 
 ## Make yourself cosy
 
-Two shortcuts work anywhere:
-
-- **⌃⌥D** (Control-Option-D) turns the scarves off and on
-- **⌃⌥B** (Control-Option-B) turns the sewing buttons off and on
+Press **⌃⌥D** (Control-Option-D) anywhere to turn the scarves off and on.
 
 Click 🧣 in the menu bar for the rest:
 
@@ -50,27 +47,18 @@ Click 🧣 in the menu bar for the rest:
 - **Thickness**: Slim, Cosy or Chunky
 - **Windows**: every window, or only the front one
 - **Apps**: untick an app to leave its windows bare
-- **Buttons on Window Controls**: see below
-- **Keyboard Shortcuts**: turn both shortcuts off if you don't want them
+- **Keyboard Shortcut ⌃⌥D**: turn the shortcut off if you don't want it
 - **Start at Login**: open Window Scarves automatically when you log in
 
 Not every window gets one. A window that fills the whole screen goes bare, and so do popovers, hover cards, sheets and dialogs that sit on top of another window.
 
 The scarf stays on the window's top edge, so it never covers the red, yellow and green buttons. If there's no room on screen beside a window, the long end moves to the other side, the short end is left off, and as a last resort the long end tucks just inside the window.
 
-### The buttons
-
-Press **⌃⌥B** (or choose **Buttons on Window Controls** in the menu) to turn each window's red, yellow and green buttons into little sewing buttons. They're off until you turn them on. They're only pictures: clicks pass straight through to the real buttons underneath.
-
-This needs Accessibility permission, and the app asks for it the first time you turn the buttons on. Where those buttons sit differs from app to app (16 points in on plain windows, 26 on windows with toolbars, and anywhere at all in apps that draw their own title bars), so the only way to place a sewing button exactly on top is to ask the window, and macOS only allows that with permission. Without it, no sewing buttons are drawn. The scarves never need it. The permission is only used for this.
-
-If you build the app yourself: it's ad-hoc signed, so macOS treats each new build as a different app. After rebuilding, switch Window Scarves off and on again under **System Settings → Privacy & Security → Accessibility**.
-
 ## How it works
 
-Window Scarves uses only public macOS APIs.
+Window Scarves uses only public macOS APIs, and it doesn't need any permissions.
 
-- `CGWindowListCopyWindowInfo` reports where every window is and how they're stacked. This needs no permission, so the scarves work without any.
+- `CGWindowListCopyWindowInfo` reports where every window is and how they're stacked.
 - Each scarf is its own transparent, click-through window, ordered directly above the window it's worn by. Windows in front still cover it, just like real fabric.
 - The app checks the windows 10 times a second when nothing is happening, and 120 times a second while anything is moving, so scarves keep up with drags and resizes without wasting power.
 - Scarves are knitted into images on a background thread and re-knitted as a window is resized. They fade in rather than popping, and the app idles at about 1% CPU.
@@ -89,6 +77,7 @@ open --env SCARVES_SNAPSHOT=/tmp/scarves "build/Window Scarves.app"
 
 ## Ideas for later
 
+- Sewing buttons over the red, yellow and green window buttons
 - Falling leaves drifting past the active window
 - Choosing a scarf for each app by hand
 - More textures: cable knit, bouclé, a blanket scarf

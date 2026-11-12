@@ -3,8 +3,8 @@ import AppKit
 /// Watches the on-screen windows and keeps one scarf on each.
 ///
 /// Uses only public APIs: CGWindowListCopyWindowInfo for window positions and stacking order,
-/// and the mouse button state to know when something might be moving. Neither needs
-/// Accessibility or Screen Recording permission.
+/// and the mouse button state to know when something might be moving. Neither needs any
+/// permission.
 ///
 /// It checks slowly when nothing is happening and very quickly while windows are changing,
 /// so scarves keep up with drags and resizes without wasting power the rest of the time.
@@ -23,7 +23,6 @@ final class Tracker {
     /// What the windows looked like at the last check, to notice when anything changes.
     private var lastSeen: [CGWindowID: CGRect] = [:]
     private var lastOrder: [CGWindowID] = []
-    private var trusted = (value: false, checked: CFTimeInterval(0))
     /// Newly seen windows, with the frame they had and when they first had it.
     private var settling: [CGWindowID: (frame: CGRect, since: CFTimeInterval)] = [:]
 
@@ -115,7 +114,6 @@ final class Tracker {
 
     func removeAll() {
         overlays.removeAll()
-        controlsCache.removeAll()
         lastSeen.removeAll()
         lastOrder.removeAll()
         settling.removeAll()
@@ -127,31 +125,6 @@ final class Tracker {
         var owner: String
         var pid: pid_t
         var index: Int
-    }
-
-    /// Exact button positions found via Accessibility, per window, with the size they were found at.
-    private var controlsCache: [CGWindowID: (size: CGSize, controls: WindowControls.Controls?, checked: Date)] = [:]
-
-    /// Whether we have Accessibility permission. Asked at most once a second.
-    private var isTrusted: Bool {
-        let now = CACurrentMediaTime()
-        if now - trusted.checked > 1 { trusted = (WindowControls.trusted, now) }
-        return trusted.value
-    }
-
-    /// Where this window's real buttons are, or nil if we can't tell exactly. Buttons are only
-    /// drawn when they can sit precisely on the real ones, which needs Accessibility permission.
-    private func controls(for t: Target) -> WindowControls.Controls? {
-        guard settings.sewnButtons, isTrusted else { return nil }
-        if let c = controlsCache[t.id] {
-            // Reuse the answer until the window changes size; retry a failed lookup after a while.
-            let fresh = c.controls != nil || Date().timeIntervalSince(c.checked) < 5
-            if mouseDown || (c.size == t.frame.size && fresh) { return c.controls }
-        }
-        var found = WindowControls.lookup(pid: t.pid, windowFrame: t.frame)
-        if found?.centres.isEmpty == true { found = nil }
-        controlsCache[t.id] = (t.frame.size, found, Date())
-        return found
     }
 
     /// Each screen's usable area (below the menu bar, beside the Dock) in CoreGraphics coordinates.
@@ -271,7 +244,6 @@ final class Tracker {
             // Forget windows that have been gone a while (closed, or on another Space for ages).
             if now.timeIntervalSince(overlay.lastSeen) > 60 {
                 overlays[id] = nil
-                controlsCache[id] = nil
             }
         }
 
@@ -301,7 +273,7 @@ final class Tracker {
                                                   roomRight: screen.maxX - t.frame.maxX, T: T)
                 style = ScarfStyle(colourway: cw.id, T: T, side: side, fit: fit)
             }
-            overlay.update(frame: t.frame, colourway: cw, style: style, controls: controls(for: t))
+            overlay.update(frame: t.frame, colourway: cw, style: style)
 
             // Keep the scarf directly above its own window.
             if index[CGWindowID(overlay.window.windowNumber)] == t.index - 1 {

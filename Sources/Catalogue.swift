@@ -69,19 +69,6 @@ enum Catalogue {
                 drawPlaced(ctx, img, p, origin: r.origin)
             }
         }
-        // Sewn-on buttons over the window's own.
-        let d: CGFloat = 15
-        for (k, c) in mockControls(r).enumerated() {
-            guard let img = SewnButtons.image(k, diameter: d, scale: scale) else { continue }
-            let pad = SewnButtons.padding(d)
-            let rect = CGRect(x: r.minX + c.x - d / 2 - pad, y: r.minY + c.y - d / 2 - pad,
-                              width: d + 2 * pad, height: d + 2 * pad)
-            ctx.saveGState()
-            ctx.translateBy(x: 0, y: rect.minY + rect.maxY)
-            ctx.scaleBy(x: 1, y: -1)
-            ctx.draw(img, in: rect)
-            ctx.restoreGState()
-        }
     }
 
     static func drawText(_ ctx: CGContext, _ s: String, at p: CGPoint, size: CGFloat, weight: NSFont.Weight,
