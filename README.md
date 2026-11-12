@@ -93,13 +93,19 @@ Window Scarves uses only public macOS APIs.
 
 - `CGWindowListCopyWindowInfo` reports where every window is and how they're stacked. This needs no permission, so the scarves work without any.
 - Each scarf is its own transparent, click-through window, ordered directly above the window it's worn by. Windows in front still cover it, just like real fabric.
-- The app checks every 0.2 seconds, and more often while you drag a window, so scarves follow along.
-- Scarves are knitted into images on a background thread and cached, so the app idles at under 1% CPU.
+- The app checks the windows 10 times a second when nothing is happening, and 120 times a second while anything is moving, so scarves keep up with drags and resizes without wasting power.
+- Scarves are knitted into images on a background thread and re-knitted as a window is resized. They fade in rather than popping, and the app idles at about 1% CPU.
 
 Render the preview images without touching your real windows:
 
 ```sh
 "build/Window Scarves.app/Contents/MacOS/WindowScarves" --render docs
+```
+
+To see exactly what the app is drawing on your real windows, start it with `SCARVES_SNAPSHOT` set to a folder. A few seconds later it saves a picture of each scarf there:
+
+```sh
+open --env SCARVES_SNAPSHOT=/tmp/scarves "build/Window Scarves.app"
 ```
 
 ## Ideas for later

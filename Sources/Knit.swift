@@ -312,7 +312,7 @@ enum ScarfArt {
     static func piece(_ cw: Colourway, _ g: ScarfGeometry, rect: CGRect, key: String, scale: CGFloat) -> CGImage? {
         let cacheKey = "\(key)|\(cw.id)|\(g.key)|\(scale)"
         if let c = cache[cacheKey] { return c }
-        if cache.count > 48 { cache.removeAll() }
+        if cache.count > 16 { cache.removeAll() }
         let img = Knit.image(size: rect.size, scale: scale) { ctx in
             ctx.translateBy(x: -rect.minX, y: -rect.minY)
             let tube = g.tube

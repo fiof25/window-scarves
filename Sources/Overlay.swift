@@ -17,27 +17,35 @@ struct ScarfStyle: Equatable {
 
 /// One scarf, worn by one window. It sits directly above its window in the stacking order,
 /// so windows in front of it still cover it.
+///
+/// The window itself stays on screen for as long as the scarf exists; showing and hiding only
+/// fades its contents. That avoids macOS replaying its "new window" animation every time.
 final class ScarfOverlay {
     let targetID: CGWindowID
     let window: OverlayWindow
     private let root = CALayer()
+    /// Everything visible, so it can be faded as one.
+    private let content = CALayer()
     /// Holds the sewn-on buttons, always above the scarf.
     private let buttonRoot = CALayer()
     private var buttonLayers: [CALayer] = []
     private var controls: WindowControls.Controls?
     private var layers: [CALayer] = []
     private var placements: [Placement] = []
-    private var style: ScarfStyle?
+    private(set) var style: ScarfStyle?
     private var builtSize: CGSize = .zero
-    private var tailLength: CGFloat = 0
     private var extents: CGRect = .zero
-    private var lastBuild: CFTimeInterval = 0
-    private var pendingRebuild: DispatchWorkItem?
     private var targetFrame: CGRect = .zero
     private var colourway: Colourway = Colourways.rosehip
-    private var renderGeneration = 0
-    var lastSeen = Date()
+    private var rendering = false
+    private var needsRender = false
+    /// Whether the layers hold images that match the current style.
+    private var hasContents = false
     private(set) var isShown = false
+    var lastSeen = Date()
+    /// Bookkeeping for keeping the scarf directly above its window (see `Tracker`).
+    var lastOrder: CFTimeInterval = 0
+    var orderMisses = 0
     let scale: CGFloat
 
     init(targetID: CGWindowID) {
@@ -57,46 +65,70 @@ final class ScarfOverlay {
         view.layer = root
         view.wantsLayer = true
         window.contentView = view
-        root.addSublayer(buttonRoot)
+        content.opacity = 0
+        root.addSublayer(content)
+        content.addSublayer(buttonRoot)
     }
 
     deinit { window.orderOut(nil) }
 
     /// Follow the target window. `frame` is in global CoreGraphics coordinates (top-left origin).
-    /// `live` is true while the mouse is down, when re-knitting is throttled.
     func update(frame: CGRect, colourway cw: Colourway, style newStyle: ScarfStyle,
-                controls newControls: WindowControls.Controls?, live: Bool) {
+                controls newControls: WindowControls.Controls?) {
         targetFrame = frame
         colourway = cw
         if newControls != controls {
             controls = newControls
             rebuildButtons()
         }
-        if newStyle != style || layers.isEmpty {
-            rebuild(size: frame.size, style: newStyle)
+        if newStyle != style {
+            // A different scarf or a different drape: the old pictures don't fit the new shape,
+            // so fade out and come back once the new ones are knitted.
+            if style != nil { setOpacity(0) }
+            hasContents = false
+            layout(size: frame.size, style: newStyle)
+            startRender()
         } else if frame.size != builtSize {
-            if !live && CACurrentMediaTime() - lastBuild > 0.15 {
-                rebuild(size: frame.size, style: newStyle)
-            } else {
-                relayout(size: frame.size)
-                scheduleRebuild()
-            }
+            // Same scarf, new size: the old pictures stretch slightly until fresh ones land.
+            layout(size: frame.size, style: newStyle)
+            startRender()
         }
         applyFrame()
     }
 
-    func show() {
-        if ProcessInfo.processInfo.environment["SCARVES_DEBUG"] != nil {
-            FileHandle.standardError.write(Data("order above \(targetID) (shown=\(isShown))\n".utf8))
-        }
+    /// Put the scarf's window directly above the window it belongs to.
+    func placeAboveTarget() {
         window.order(.above, relativeTo: Int(targetID))
+    }
+
+    func show() {
+        guard !isShown else { return }
         isShown = true
+        if hasContents { fadeIn() }
     }
 
     func hide() {
         guard isShown else { return }
-        window.orderOut(nil)
         isShown = false
+        setOpacity(0)
+    }
+
+    private func setOpacity(_ value: Float) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        content.removeAnimation(forKey: "fade")
+        content.opacity = value
+        CATransaction.commit()
+    }
+
+    private func fadeIn() {
+        setOpacity(1)
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0
+        fade.toValue = 1
+        fade.duration = 0.18
+        fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        content.add(fade, forKey: "fade")
     }
 
     private func rebuildButtons() {
@@ -127,27 +159,13 @@ final class ScarfOverlay {
         }
     }
 
-    private func scheduleRebuild() {
-        pendingRebuild?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self, let style = self.style else { return }
-            self.rebuild(size: self.targetFrame.size, style: style)
-            self.applyFrame()
-        }
-        pendingRebuild = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
-    }
-
-    private func rebuild(size: CGSize, style newStyle: ScarfStyle) {
-        pendingRebuild?.cancel()
-        pendingRebuild = nil
+    /// Work out where each piece of the scarf goes for this window size, and move the layers there.
+    private func layout(size: CGSize, style newStyle: ScarfStyle) {
         style = newStyle
         builtSize = size
-        lastBuild = CACurrentMediaTime()
-        tailLength = ScarfLayout.tailLength(height: size.height, T: newStyle.T)
+        let tail = ScarfLayout.tailLength(height: size.height, T: newStyle.T)
         placements = ScarfLayout.placements(size: size, T: newStyle.T, side: newStyle.side,
-                                            tailLength: tailLength, fit: newStyle.fit)
-
+                                            tailLength: tail, fit: newStyle.fit)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         if layers.count != placements.count {
@@ -157,52 +175,75 @@ final class ScarfOverlay {
                 l.contentsScale = scale
                 l.contentsGravity = .resize
                 l.minificationFilter = .trilinear
-                root.insertSublayer(l, below: buttonRoot)
+                l.anchorPoint = CGPoint(x: 0, y: 1)
+                content.insertSublayer(l, below: buttonRoot)
                 return l
             }
         }
         extents = ScarfLayout.extents(placements, window: size)
-        positionLayers()
-        CATransaction.commit()
-
-        // Knit the new pieces in the background; until they're ready the old ones stretch to fit.
-        renderGeneration += 1
-        let generation = renderGeneration, ps = placements, cw = colourway, scale = scale
-        ScarfOverlay.artQueue.async { [weak self] in
-            let images = ps.map { ScarfLayout.image(for: $0, colourway: cw, scale: scale) }
-            DispatchQueue.main.async {
-                guard let self, generation == self.renderGeneration else { return }
-                CATransaction.begin()
-                CATransaction.setDisableActions(true)
-                for (l, img) in zip(self.layers, images) { l.contents = img }
-                CATransaction.commit()
-            }
+        let H = extents.height
+        for (l, p) in zip(layers, placements) {
+            l.bounds = CGRect(origin: .zero, size: p.size)
+            l.position = CGPoint(x: p.origin.x - extents.minX, y: H - (p.origin.y - extents.minY))
         }
+        positionButtons()
+        CATransaction.commit()
     }
 
     /// All knitting happens here, one piece at a time, off the main thread.
     static let artQueue = DispatchQueue(label: "window-scarves.knitting", qos: .userInitiated)
 
-    /// Move the existing pieces for a new window size without re-knitting them (used mid-resize).
-    private func relayout(size: CGSize) {
-        guard let style else { return }
-        placements = ScarfLayout.placements(size: size, T: style.T, side: style.side, tailLength: tailLength,
-                                            fit: style.fit)
-        extents = ScarfLayout.extents(placements, window: size)
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        positionLayers()
-        CATransaction.commit()
+    /// Knit pictures for the current layout in the background. Only one job runs per scarf at a
+    /// time: if the window changes again meanwhile, one more job runs afterwards for the latest
+    /// size, so a long resize never builds up a queue.
+    private func startRender() {
+        guard !rendering else { needsRender = true; return }
+        rendering = true
+        let ps = placements, cw = colourway, scale = scale, knitted = style
+        ScarfOverlay.artQueue.async { [weak self] in
+            let images = ps.map { ScarfLayout.image(for: $0, colourway: cw, scale: scale) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.rendering = false
+                // Pictures for an older size are still worth showing (they stretch a touch);
+                // pictures for a different scarf or drape are not.
+                if knitted == self.style, images.count == self.layers.count {
+                    CATransaction.begin()
+                    CATransaction.setDisableActions(true)
+                    for (l, img) in zip(self.layers, images) { l.contents = img }
+                    CATransaction.commit()
+                    if !self.hasContents {
+                        self.hasContents = true
+                        if self.isShown { self.fadeIn() }
+                    }
+                }
+                if self.needsRender {
+                    self.needsRender = false
+                    self.startRender()
+                }
+            }
+        }
     }
 
-    private func positionLayers() {
-        let H = extents.height
-        for (l, p) in zip(layers, placements) {
-            l.bounds = CGRect(origin: .zero, size: p.size)
-            l.anchorPoint = CGPoint(x: 0, y: 1)
-            l.position = CGPoint(x: p.origin.x - extents.minX, y: H - (p.origin.y - extents.minY))
-        }
-        positionButtons()
+    /// A picture of the scarf exactly as it's currently being drawn, with the window's outline
+    /// for reference. Used by the `SCARVES_SNAPSHOT` debugging option.
+    func snapshot() -> CGImage? {
+        let size = root.bounds.size
+        guard size.width > 1, size.height > 1,
+              let ctx = CGContext(data: nil, width: Int(size.width), height: Int(size.height), bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: Knit.sRGB,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.setFillColor(CGColor(srgbRed: 0.93, green: 0.93, blue: 0.95, alpha: 1))
+        ctx.fill(CGRect(origin: .zero, size: size))
+        // The window this scarf belongs to, in the layer's bottom-left coordinates.
+        let win = CGRect(x: -extents.minX, y: size.height - (targetFrame.height - extents.minY),
+                         width: targetFrame.width, height: targetFrame.height)
+        ctx.setFillColor(CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fill(win)
+        ctx.setStrokeColor(CGColor(srgbRed: 0.6, green: 0.6, blue: 0.65, alpha: 1))
+        ctx.stroke(win, width: 1)
+        root.render(in: ctx)
+        return ctx.makeImage()
     }
 
     private func applyFrame() {
@@ -212,15 +253,15 @@ final class ScarfOverlay {
         let ns = NSRect(x: cg.minX, y: primaryHeight - cg.maxY, width: cg.width, height: cg.height)
         if window.frame != ns {
             window.setFrame(ns, display: false)
-            if ProcessInfo.processInfo.environment["SCARVES_DEBUG"] != nil {
-                FileHandle.standardError.write(Data(
-                    "target=\(targetFrame) extents=\(extents) wanted=\(ns) got=\(window.frame)\n".utf8))
-            }
         }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        root.frame = CGRect(origin: .zero, size: ns.size)
-        buttonRoot.frame = root.bounds
-        CATransaction.commit()
+        let bounds = CGRect(origin: .zero, size: ns.size)
+        if content.frame != bounds {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            root.frame = bounds
+            content.frame = bounds
+            buttonRoot.frame = bounds
+            CATransaction.commit()
+        }
     }
 }

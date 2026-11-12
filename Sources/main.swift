@@ -25,6 +25,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         updateHotKey()
 
+        // Debugging aid: SCARVES_SNAPSHOT=<folder> saves a picture of each scarf a few seconds in.
+        if let dir = ProcessInfo.processInfo.environment["SCARVES_SNAPSHOT"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                self?.tracker.saveSnapshots(to: dir)
+            }
+        }
+
 
     }
 

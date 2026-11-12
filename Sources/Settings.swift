@@ -54,9 +54,19 @@ final class Settings {
 
     /// Which scarf each app has been given, in "a different scarf for each app" mode.
     private var assignments: [String: String] {
-        get { d.dictionary(forKey: "assignments") as? [String: String] ?? [:] }
-        set { d.set(newValue, forKey: "assignments") }
+        get {
+            // Kept in memory: this is read for every window on every check.
+            if let cached = assignmentCache { return cached }
+            let stored = d.dictionary(forKey: "assignments") as? [String: String] ?? [:]
+            assignmentCache = stored
+            return stored
+        }
+        set {
+            assignmentCache = newValue
+            d.set(newValue, forKey: "assignments")
+        }
     }
+    private var assignmentCache: [String: String]?
 
     /// Hand every app a fresh scarf.
     func shuffleAssignments() {

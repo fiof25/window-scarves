@@ -3,16 +3,32 @@ import AppKit
 /// Watches the on-screen windows and keeps one scarf on each.
 ///
 /// Uses only public APIs: CGWindowListCopyWindowInfo for window positions and stacking order,
-/// and a global mouse monitor to follow drags smoothly. Neither needs Accessibility or
-/// Screen Recording permission.
+/// and the mouse button state to know when something might be moving. Neither needs
+/// Accessibility or Screen Recording permission.
+///
+/// It checks slowly when nothing is happening and very quickly while windows are changing,
+/// so scarves keep up with drags and resizes without wasting power the rest of the time.
 final class Tracker {
     private var overlays: [CGWindowID: ScarfOverlay] = [:]
     private var timer: Timer?
     private var monitor: Any?
     private var mouseDown = false
-    private var lastRefresh: CFTimeInterval = 0
     private let settings = Settings.shared
     private let myPID = getpid()
+
+    /// Checking at full speed until this time.
+    private var fastUntil: CFTimeInterval = 0
+    private var isFast = false
+    private var idleTicks = 0
+    /// What the windows looked like at the last check, to notice when anything changes.
+    private var lastSeen: [CGWindowID: CGRect] = [:]
+    private var lastOrder: [CGWindowID] = []
+    private var trusted = (value: false, checked: CFTimeInterval(0))
+
+    private static let fastInterval = 1.0 / 120
+    private static let idleInterval = 1.0 / 30
+    /// While idle, look at the windows on every Nth tick (10 times a second).
+    private static let idleStride = 3
 
     /// Things that draw normal-level windows but aren't really app windows.
     private let ignoredOwners: Set<String> = [
@@ -22,29 +38,16 @@ final class Tracker {
         "universalAccessAuthWarn", "SecurityAgent", "CoreServicesUIAgent", "UserNotificationCenter",
     ]
 
-    /// Apps seen with windows recently, for the "Skip an App" menu.
+    /// Apps seen with windows recently, for the "Apps" menu.
     private(set) var recentApps: Set<String> = []
 
     func start() {
-        timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in self?.refresh() }
-        RunLoop.main.add(timer!, forMode: .common)
+        setTimer(fast: false)
 
-        monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp, .leftMouseDragged]) {
-            [weak self] e in
-            guard let self else { return }
-            switch e.type {
-            case .leftMouseDown:
-                self.mouseDown = true
-                self.refreshSoon(0.03)
-            case .leftMouseDragged:
-                if CACurrentMediaTime() - self.lastRefresh > 1.0 / 90 { self.refresh() }
-            case .leftMouseUp:
-                self.mouseDown = false
-                self.refresh()
-                self.refreshSoon(0.15)
-                self.refreshSoon(0.4)
-            default: break
-            }
+        // A click often raises, closes or starts dragging a window: look closely straight away.
+        // (If this monitor never fires, the timer's own check of the mouse button covers it.)
+        monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] _ in
+            self?.wake()
         }
 
         let nc = NSWorkspace.shared.notificationCenter
@@ -53,26 +56,66 @@ final class Tracker {
             NSWorkspace.didHideApplicationNotification, NSWorkspace.didUnhideApplicationNotification,
             NSWorkspace.didTerminateApplicationNotification, NSWorkspace.didLaunchApplicationNotification,
         ] {
-            nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                self?.refresh()
-                self?.refreshSoon(0.25)
-                self?.refreshSoon(0.6)
-            }
+            nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.wake(0.8) }
         }
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
-        ) { [weak self] _ in self?.refresh() }
+        ) { [weak self] _ in self?.wake() }
 
         refresh()
     }
 
-    func refreshSoon(_ delay: Double) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.refresh() }
+    /// Something just happened that may move windows: check now and keep checking quickly for a bit.
+    func wake(_ duration: Double = 0.4) {
+        stayFast(duration)
+        refresh()
+    }
+
+    private func stayFast(_ duration: Double) {
+        fastUntil = max(fastUntil, CACurrentMediaTime() + duration)
+        if !isFast { setTimer(fast: true) }
+    }
+
+    private func setTimer(fast: Bool) {
+        isFast = fast
+        timer?.invalidate()
+        let t = Timer(timeInterval: fast ? Tracker.fastInterval : Tracker.idleInterval, repeats: true) {
+            [weak self] _ in self?.tick()
+        }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    private func tick() {
+        let down = NSEvent.pressedMouseButtons & 1 != 0
+        if down != mouseDown {
+            mouseDown = down
+            stayFast(0.4)
+        }
+        if isFast {
+            refresh()
+            if CACurrentMediaTime() > fastUntil { setTimer(fast: false) }
+        } else {
+            idleTicks += 1
+            // With the button held, a drag could start at any moment, so look on every tick.
+            if mouseDown || idleTicks % Tracker.idleStride == 0 { refresh() }
+        }
+    }
+
+    /// Save a picture of every scarf as it's currently drawn (a debugging aid).
+    func saveSnapshots(to dir: String) {
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        for (id, overlay) in overlays where overlay.isShown {
+            guard let img = overlay.snapshot() else { continue }
+            _ = Catalogue.write(img, to: "\(dir)/scarf-\(id).png")
+        }
     }
 
     func removeAll() {
-        overlays.values.forEach { $0.hide() }
         overlays.removeAll()
+        controlsCache.removeAll()
+        lastSeen.removeAll()
+        lastOrder.removeAll()
     }
 
     private struct Target {
@@ -86,10 +129,17 @@ final class Tracker {
     /// Exact button positions found via Accessibility, per window, with the size they were found at.
     private var controlsCache: [CGWindowID: (size: CGSize, controls: WindowControls.Controls?, checked: Date)] = [:]
 
+    /// Whether we have Accessibility permission. Asked at most once a second.
+    private var isTrusted: Bool {
+        let now = CACurrentMediaTime()
+        if now - trusted.checked > 1 { trusted = (WindowControls.trusted, now) }
+        return trusted.value
+    }
+
     /// Where this window's real buttons are, or nil if we can't tell exactly. Buttons are only
     /// drawn when they can sit precisely on the real ones, which needs Accessibility permission.
     private func controls(for t: Target) -> WindowControls.Controls? {
-        guard settings.sewnButtons, WindowControls.trusted else { return nil }
+        guard settings.sewnButtons, isTrusted else { return nil }
         if let c = controlsCache[t.id] {
             // Reuse the answer until the window changes size; retry a failed lookup after a while.
             let fresh = c.controls != nil || Date().timeIntervalSince(c.checked) < 5
@@ -118,9 +168,8 @@ final class Tracker {
     }
 
     func refresh() {
-        lastRefresh = CACurrentMediaTime()
         guard settings.enabled else {
-            overlays.values.forEach { $0.hide() }
+            if !overlays.isEmpty { removeAll() }
             return
         }
         guard let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
@@ -154,9 +203,17 @@ final class Tracker {
 
         if settings.frontOnly { targets = Array(targets.prefix(1)) }
 
+        // If any window moved, resized, appeared, vanished or changed order, keep watching closely.
+        let seen = Dictionary(uniqueKeysWithValues: targets.map { ($0.id, $0.frame) })
+        let order = targets.map(\.id)
+        if seen != lastSeen || order != lastOrder {
+            lastSeen = seen
+            lastOrder = order
+            stayFast(0.5)
+        }
+
         let now = Date()
-        let live = Set(targets.map(\.id))
-        for (id, overlay) in overlays where !live.contains(id) {
+        for (id, overlay) in overlays where seen[id] == nil {
             overlay.hide()
             // Forget windows that have been gone a while (closed, or on another Space for ages).
             if now.timeIntervalSince(overlay.lastSeen) > 60 {
@@ -167,6 +224,7 @@ final class Tracker {
 
         let thickness = settings.thickness.points
         let visible = visibleRectsCG()
+        let clock = CACurrentMediaTime()
         for t in targets {
             let overlay = overlays[t.id] ?? {
                 let o = ScarfOverlay(targetID: t.id)
@@ -176,19 +234,38 @@ final class Tracker {
             overlay.lastSeen = now
             let cw = settings.colourway(forApp: t.owner)
             let T = (thickness * cw.weight).rounded()
-            // Fit the scarf to the free space on screen either side of the window.
-            let screen = visible.first { $0.insetBy(dx: -1, dy: -40).contains(CGPoint(x: t.frame.midX, y: t.frame.minY)) }
-                ?? visible.first { $0.intersects(t.frame) } ?? t.frame.insetBy(dx: -200, dy: -200)
-            let (side, fit) = ScarfLayout.fit(preferred: settings.knot, roomLeft: t.frame.minX - screen.minX,
-                                              roomRight: screen.maxX - t.frame.maxX, T: T)
-            let style = ScarfStyle(colourway: cw.id, T: T, side: side, fit: fit)
-            overlay.update(frame: t.frame, colourway: cw, style: style, controls: controls(for: t), live: mouseDown)
+
+            var style: ScarfStyle
+            if mouseDown, let current = overlay.style, current.colourway == cw.id, current.T == T {
+                // Mid-drag: keep the scarf's drape as it is. Re-fitting it every time the window
+                // crosses a screen edge would make it flicker; it settles when the button is released.
+                style = current
+            } else {
+                // Fit the scarf to the free space on screen either side of the window.
+                let screen = visible.first {
+                    $0.insetBy(dx: -1, dy: -40).contains(CGPoint(x: t.frame.midX, y: t.frame.minY))
+                } ?? visible.first { $0.intersects(t.frame) } ?? t.frame.insetBy(dx: -200, dy: -200)
+                let (side, fit) = ScarfLayout.fit(preferred: settings.knot, roomLeft: t.frame.minX - screen.minX,
+                                                  roomRight: screen.maxX - t.frame.maxX, T: T)
+                style = ScarfStyle(colourway: cw.id, T: T, side: side, fit: fit)
+            }
+            overlay.update(frame: t.frame, colourway: cw, style: style, controls: controls(for: t))
 
             // Keep the scarf directly above its own window.
-            let overlayIndex = index[CGWindowID(overlay.window.windowNumber)]
-            if !overlay.isShown || overlayIndex == nil || overlayIndex! != t.index - 1 {
-                overlay.show()
+            if index[CGWindowID(overlay.window.windowNumber)] == t.index - 1 {
+                overlay.orderMisses = 0
+            } else {
+                // If it won't stay put (another window insists on sitting between them), stop
+                // re-stacking it on every check, which would flicker, and just retry now and then.
+                let wait = overlay.orderMisses < 3 ? 0 : 1.0
+                if clock - overlay.lastOrder >= wait {
+                    overlay.placeAboveTarget()
+                    overlay.lastOrder = clock
+                    if overlay.orderMisses < 3 { stayFast(0.2) }
+                    overlay.orderMisses += 1
+                }
             }
+            overlay.show()
         }
     }
 }
