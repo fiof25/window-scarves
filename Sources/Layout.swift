@@ -138,8 +138,12 @@ enum ScarfLayout {
         let want = roomWanted(T: T)
         let room = { (s: KnotSide) in s == .right ? roomRight : roomLeft }
         let other: KnotSide = preferred == .right ? .left : .right
-        // The long end goes where there's room; only tuck it inside if neither side has any.
-        let side = room(preferred) < want && room(other) >= want ? other : preferred
+        // The long end goes where there's room. If neither side has any it has to tuck inside the
+        // window, and then it always goes on the right, away from the window's buttons.
+        let side: KnotSide
+        if room(preferred) >= want { side = preferred }
+        else if room(other) >= want { side = other }
+        else { side = .right }
         let far: KnotSide = side == .right ? .left : .right
         var fit = ScarfFit()
         if room(side) < want {

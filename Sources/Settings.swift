@@ -15,7 +15,13 @@ final class Settings {
 
     /// A colourway id, or `Colourways.byAppID` for a different scarf per app.
     var colourway: String {
-        get { d.string(forKey: "colourway") ?? Colourways.byAppID }
+        get {
+            // A scarf saved by an older version may no longer exist; fall back to mixed.
+            guard let saved = d.string(forKey: "colourway"), Colourways.byID(saved) != nil else {
+                return Colourways.byAppID
+            }
+            return saved
+        }
         set { d.set(newValue, forKey: "colourway"); changed() }
     }
 

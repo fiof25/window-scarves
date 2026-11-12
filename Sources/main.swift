@@ -32,16 +32,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// ⌃⌥D anywhere turns the scarves on and off. (Control-Option-D isn't used by macOS or
-    /// common apps, so it doesn't take a shortcut away from anything else.)
+    /// ⌃⌥S anywhere turns the scarves on and off. (Window managers such as Rectangle and Magnet
+    /// use Control-Option with many letters, D included; S is one they leave alone.)
     private func updateHotKey() {
         hotKey = nil
         guard settings.shortcutEnabled else { return }
-        hotKey = HotKey(keyCode: kVK_ANSI_D, modifiers: controlKey | optionKey) { [weak self] in
+        hotKey = HotKey(keyCode: kVK_ANSI_S, modifiers: controlKey | optionKey) { [weak self] in
             self?.settings.enabled.toggle()
         }
         if hotKey == nil {
-            FileHandle.standardError.write(Data("Window Scarves: couldn't register ⌃⌥D (another app may own it)\n".utf8))
+            FileHandle.standardError.write(Data("Window Scarves: couldn't register ⌃⌥S (another app may own it)\n".utf8))
         }
     }
 
@@ -55,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
 
         let onOff = item(settings.enabled ? "Scarves On" : "Scarves Off", #selector(toggleEnabled),
-                         on: settings.enabled, key: settings.shortcutEnabled ? "d" : "")
+                         on: settings.enabled, key: settings.shortcutEnabled ? "s" : "")
         onOff.keyEquivalentModifierMask = [.control, .option]
         menu.addItem(onOff)
         menu.addItem(.separator())
@@ -99,7 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(submenu("Apps", apps))
 
         menu.addItem(.separator())
-        menu.addItem(item("Keyboard Shortcut ⌃⌥D", #selector(toggleShortcut), on: settings.shortcutEnabled))
+        menu.addItem(item("Keyboard Shortcut ⌃⌥S", #selector(toggleShortcut), on: settings.shortcutEnabled))
         menu.addItem(item("Start at Login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
         menu.addItem(.separator())
         if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
@@ -185,6 +185,11 @@ if let i = args.firstIndex(of: "--render"), i + 1 < args.count {
                              fit: ScarfFit(tuck: 0.9 * 43, shortEnd: false))
     print(ok ? "Rendered previews into \(dir)" : "Rendering failed")
     exit(ok ? 0 : 1)
+}
+
+// `--render-icon <file.png>` draws the app icon.
+if let i = args.firstIndex(of: "--render-icon"), i + 1 < args.count {
+    exit(Catalogue.icon(to: args[i + 1]) ? 0 : 1)
 }
 
 // `--self-test` checks the scarf-making code without touching any real windows.

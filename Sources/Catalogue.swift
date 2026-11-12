@@ -142,6 +142,55 @@ enum Catalogue {
         return write(img, to: path)
     }
 
+    /// The app's icon: a little window wearing a scarf, on a forest green tile.
+    static func icon(to path: String) -> Bool {
+        let size = CGSize(width: 512, height: 512)
+        guard let img = Knit.image(size: size, scale: 2, { ctx in
+            // The rounded tile every macOS icon sits on, with a soft shadow.
+            let tile = CGPath(roundedRect: CGRect(x: 50, y: 50, width: 412, height: 412),
+                              cornerWidth: 92, cornerHeight: 92, transform: nil)
+            ctx.saveGState()
+            ctx.setShadow(offset: CGSize(width: 0, height: -10), blur: 22, color: Knit.black(0.3))
+            ctx.addPath(tile)
+            ctx.setFillColor(Yarn(0x2E4A3A).cg)
+            ctx.fillPath()
+            ctx.restoreGState()
+            ctx.saveGState()
+            ctx.addPath(tile)
+            ctx.clip()
+            let colors = [Yarn(0x3B5E4A).cg, Yarn(0x24392D).cg] as CFArray
+            if let g = CGGradient(colorsSpace: Knit.sRGB, colors: colors, locations: [0, 1]) {
+                ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: 50), end: CGPoint(x: 0, y: 462), options: [])
+            }
+            ctx.restoreGState()
+
+            // A simple window: white, with a title strip and three dots.
+            // Placed so the window and scarf together (the long end hangs below the window)
+            // sit in the middle of the tile.
+            let r = CGRect(x: 131, y: 150, width: 250, height: 196)
+            let window = CGPath(roundedRect: r, cornerWidth: 24, cornerHeight: 24, transform: nil)
+            ctx.saveGState()
+            ctx.setShadow(offset: CGSize(width: 0, height: -8), blur: 24, color: Knit.black(0.35))
+            ctx.addPath(window)
+            ctx.setFillColor(CGColor(srgbRed: 1, green: 0.995, blue: 0.985, alpha: 1))
+            ctx.fillPath()
+            ctx.restoreGState()
+            ctx.saveGState()
+            ctx.addPath(window)
+            ctx.clip()
+            ctx.setFillColor(CGColor(srgbRed: 0.955, green: 0.945, blue: 0.93, alpha: 1))
+            ctx.fill(CGRect(x: r.minX, y: r.minY, width: r.width, height: 56))
+            for (i, hex) in ([0xFF5F57, 0xFEBC2E, 0x28C840] as [UInt32]).enumerated() {
+                ctx.setFillColor(Yarn(hex).cg)
+                ctx.fillEllipse(in: CGRect(x: r.minX + 26 + CGFloat(i) * 30, y: r.minY + 26, width: 19, height: 19))
+            }
+            ctx.restoreGState()
+
+            drawScarf(ctx, on: r, colourway: Colourways.rosehip, side: .right, T: 46, scale: 2)
+        }) else { return false }
+        return write(img, to: path)
+    }
+
     /// A close-up of the knit, to check stitch detail.
     static func closeUp(to path: String, colourway cw: Colourway, scale: CGFloat = 3,
                         fit: ScarfFit = .roomy) -> Bool {

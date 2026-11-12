@@ -347,7 +347,7 @@ enum Knit {
             // Mohair fibres take the (rounded) colour of the cell they lie on; knits use one colour.
             let colour = texture == .mohair
                 ? Int(w.yarn.r * 24) << 16 | Int(w.yarn.g * 24) << 8 | Int(w.yarn.b * 24) : 0
-            let key = (w.row + 8) / 16 << 24 | colour
+            let key = ((w.row + 8) / 16) << 24 | colour
             let path = batches[key] ?? CGMutablePath()
             path.move(to: w.from)
             path.addLine(to: w.to)
@@ -479,7 +479,9 @@ enum ScarfArt {
         lock.unlock()
         if let hit { return hit }
 
-        let strips = parallel ? split(rect) : [rect]
+        // Mohair is nearly all see-through drawing, which has to take turns anyway, so cutting it
+        // into strips would only add work.
+        let strips = parallel && cw.texture != .mohair ? split(rect) : [rect]
         let img: CGImage?
         if strips.count == 1 {
             img = knit(cw, g, rect: rect, scale: scale)

@@ -106,6 +106,9 @@ enum SelfTest {
                "another app's window was treated as a popover")
         expect(!Tracker.isPopover(main, above: [window(1, CGRect(x: 400, y: 300, width: 300, height: 220))][...]),
                "a main window was treated as a popover")
+        let big = window(1, CGRect(x: 0, y: 40, width: 1500, height: 900))
+        expect(!Tracker.isPopover(window(1, CGRect(x: 300, y: 200, width: 700, height: 420)), above: [big][...]),
+               "an ordinary mid-sized window over a big one was treated as a popover")
 
         // 4. Fitting the scarf to the space beside a window.
         let T: CGFloat = 32
@@ -115,6 +118,10 @@ enum SelfTest {
         expect(side == .left && fit.tuck == 0 && !fit.shortEnd, "no room on the right should move the long end left")
         (side, fit) = ScarfLayout.fit(preferred: .right, roomLeft: 0, roomRight: 0, T: T)
         expect(side == .right && fit.tuck > 0 && !fit.shortEnd, "no room either side should tuck the long end in")
+        (side, fit) = ScarfLayout.fit(preferred: .left, roomLeft: 0, roomRight: 0, T: T)
+        expect(side == .right && fit.tuck > 0, "a tucked-in long end must go on the right, away from the window's buttons")
+        (side, fit) = ScarfLayout.fit(preferred: .left, roomLeft: 300, roomRight: 300, T: T)
+        expect(side == .left && fit == .roomy, "with room, the long end should go on the chosen side")
 
         // 5. The collection itself.
         expect(Set(Colourways.all.map(\.id)).count == Colourways.all.count, "two scarves share an id")

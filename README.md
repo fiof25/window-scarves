@@ -14,7 +14,7 @@ Every app gets a different scarf. Choose **Shuffle** in the menu to deal them ou
 
 ## Get it
 
-Window Scarves needs macOS 13 or later, and runs on Apple Silicon and Intel Macs.
+Window Scarves needs macOS 13 or later. It's built for both Apple Silicon and Intel Macs, and so far it has been tested on Apple Silicon.
 
 ### Download
 
@@ -34,11 +34,11 @@ cd window-scarves
 ./build.sh --install
 ```
 
-This builds the app, copies **Window Scarves.app** into `~/Applications`, and opens it. Run `./build.sh` without `--install` to build into `build/` only.
+This builds the app, copies **Window Scarves.app** into `~/Applications`, and opens it. Run `./build.sh` without `--install` to build into `build/` only, or `./build.sh --zip` to also make a zip for a release.
 
 ## Make yourself cosy
 
-Press **⌃⌥D** (Control-Option-D) anywhere to turn the scarves off and on.
+Press **⌃⌥S** (Control-Option-S) anywhere to turn the scarves off and on.
 
 Click 🧣 in the menu bar for the rest:
 
@@ -47,21 +47,21 @@ Click 🧣 in the menu bar for the rest:
 - **Thickness**: Slim, Cosy or Chunky
 - **Windows**: every window, or only the front one
 - **Apps**: untick an app to leave its windows bare
-- **Keyboard Shortcut ⌃⌥D**: turn the shortcut off if you don't want it
+- **Keyboard Shortcut ⌃⌥S**: turn the shortcut off if you don't want it
 - **Start at Login**: open Window Scarves automatically when you log in
 
-Not every window gets one. A window that fills the whole screen goes bare, and so do popovers, hover cards, sheets and dialogs that sit on top of another window.
+Not every window gets one. A window that fills the whole screen goes bare, and so do small popovers, hover cards and dialogs that sit on top of another window. macOS won't say what kind of window something is without extra permission, so the app judges by size and position. That means a small window resting on a bigger one from the same app also goes bare until you move it off.
 
-The scarf stays on the window's top edge, so it never covers the red, yellow and green buttons. If there's no room on screen beside a window, the long end moves to the other side, the short end is left off, and as a last resort the long end tucks just inside the window.
+The scarf stays on the window's top edge, so it never covers the red, yellow and green buttons. If there's no room on screen beside a window, the long end moves to the other side, the short end is left off, and as a last resort the long end tucks just inside the window's right edge.
 
 ## How it works
 
 Window Scarves uses only public macOS APIs, and it doesn't need any permissions.
 
 - `CGWindowListCopyWindowInfo` reports where every window is and how they're stacked.
-- Each scarf is its own transparent, click-through window, ordered directly above the window it's worn by. Windows in front still cover it, just like real fabric.
+- Each scarf is a few small transparent, click-through windows, ordered directly above the window it's worn by. They cover only the scarf, so nothing invisible sits over the app's own content, and windows in front still cover the scarf, just like real fabric.
 - The app checks the windows 10 times a second when nothing is happening, and 120 times a second while anything is moving, so scarves keep up with drags and resizes without wasting power.
-- Scarves are knitted into images in the background, in several strips at once on separate processor cores, and re-knitted as a window is resized. They fade in rather than popping, and the app idles at about 1% CPU.
+- Scarves are made into images in the background and remade as a window is resized. The knitted ones are made in several strips at once on separate processor cores. The mohair ones are mostly see-through drawing, which macOS can't safely do on several cores at once, so they're made in one go. Scarves fade in rather than popping, and the app idles at about 1 to 2% CPU.
 
 Render the preview images without touching your real windows:
 
@@ -94,7 +94,7 @@ defaults delete com.fiof25.windowscarves
 - Sewing buttons over the red, yellow and green window buttons
 - Falling leaves drifting past the active window
 - Choosing a scarf for each app by hand
-- More textures: cable knit, bouclé, a blanket scarf
+- More textures: bouclé, a blanket scarf
 - Choosing your own keyboard shortcut
 - A winter collection
 

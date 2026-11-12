@@ -154,10 +154,15 @@ final class Tracker {
         }
     }
 
-    /// Whether a window looks like a popover, hover card, sheet or dialog rather than a window
-    /// in its own right: it sits directly on top of a much bigger window from the same app and
-    /// mostly within it. `below` is the windows behind it, front to back.
+    /// Whether a window looks like a popover, hover card or small dialog rather than a window in
+    /// its own right: it is small, and it sits directly on top of a much bigger window from the
+    /// same app, mostly within it. `below` is the windows behind it, front to back.
+    ///
+    /// macOS doesn't say what kind of window something is without Accessibility permission, so
+    /// this is a judgement from size and position. A genuinely small window resting on a bigger
+    /// one from the same app is treated the same way until it's moved off.
     static func isPopover(_ w: Target, above below: ArraySlice<Target>) -> Bool {
+        guard w.frame.width <= 560, w.frame.height <= 640 else { return false }
         let area = w.frame.width * w.frame.height
         for parent in below {
             // Only windows of the same app directly beneath count; another app's window in
@@ -186,8 +191,7 @@ final class Tracker {
         var apps: Set<String> = []
 
         for (i, w) in info.enumerated() {
-            guard let num = w[kCGWindowNumber] as? Int else { continue }
-            let id = CGWindowID(num)
+            guard let num = w[kCGWindowNumber] as? Int, let id = CGWindowID(exactly: num) else { continue }
             index[id] = i
             guard (w[kCGWindowLayer] as? Int) == 0,
                   let pid = w[kCGWindowOwnerPID] as? Int32, pid != myPID else { continue }
@@ -202,15 +206,16 @@ final class Tracker {
         for (k, w) in sizeable.enumerated() {
             // A window that fills the screen (full screen, or maximised edge to edge) goes bare.
             if Tracker.fillsScreen(w.frame, screens) { continue }
-            // So do popovers, hover cards, sheets and dialogs sitting on top of their app's window.
+            // So do popovers, hover cards and small dialogs sitting on top of their app's window.
             if Tracker.isPopover(w, above: sizeable[(k + 1)...]) { continue }
             apps.insert(w.owner)
-            if skipped.contains(w.owner) { continue }
             targets.append(w)
         }
         recentApps.formUnion(apps)
 
+        // "Front window only" means the real front window; if its app is unticked, nothing wears one.
         if settings.frontOnly { targets = Array(targets.prefix(1)) }
+        targets.removeAll { skipped.contains($0.owner) }
 
         // A window that has only just appeared may still be animating open, and macOS reports
         // it at the wrong size while it does. Wait until it has held still for a moment before
@@ -232,9 +237,12 @@ final class Tracker {
         if settling.count > 64 { settling.removeAll() }
 
         // If any window moved, resized, appeared, vanished or changed order, keep watching closely.
-        let seen = Dictionary(uniqueKeysWithValues: targets.map { ($0.id, $0.frame) })
+        let seen = Dictionary(targets.map { ($0.id, $0.frame) }, uniquingKeysWith: { first, _ in first })
         let order = targets.map(\.id)
         if seen != lastSeen || order != lastOrder {
+            // The windows were re-stacked (a click, say): let every scarf be put back at once,
+            // even one that had been told to stop trying so often.
+            if order != lastOrder { overlays.values.forEach { $0.orderMisses = 0 } }
             lastSeen = seen
             lastOrder = order
             stayFast(0.5)
@@ -277,13 +285,19 @@ final class Tracker {
             }
             overlay.update(frame: t.frame, colourway: cw, style: style)
 
-            // Keep the scarf directly above its own window.
-            if index[CGWindowID(overlay.window.windowNumber)] == t.index - 1 {
+            // Keep the scarf directly above its own window: every one of its pieces should be
+            // in the block of windows immediately in front of it.
+            let numbers = overlay.windowNumbers
+            let positions = numbers.compactMap { n in CGWindowID(exactly: n).flatMap { index[$0] } }
+            let inPlace = !numbers.isEmpty && positions.count == numbers.count
+                && positions.allSatisfy { $0 < t.index && $0 >= t.index - numbers.count }
+            if inPlace {
                 overlay.orderMisses = 0
             } else {
-                // If it won't stay put (another window insists on sitting between them), stop
-                // re-stacking it on every check, which would flicker, and just retry now and then.
-                let wait = overlay.orderMisses < 3 ? 0 : 1.0
+                // If it won't stay put (another window insists on sitting between them, or the
+                // window is somewhere scarves can't go), stop re-stacking it on every check, which
+                // would flicker, and retry less and less often.
+                let wait = overlay.orderMisses < 3 ? 0 : (overlay.orderMisses < 12 ? 1.0 : 10.0)
                 if clock - overlay.lastOrder >= wait {
                     overlay.placeAboveTarget()
                     overlay.lastOrder = clock
