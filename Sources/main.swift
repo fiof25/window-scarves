@@ -24,10 +24,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         updateHotKey()
 
-        if ProcessInfo.processInfo.environment["SCARVES_TEST_GRAB"] != nil {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in self?.tracker.rehearseGrab() }
-        }
-
         // Debugging aid: SCARVES_SNAPSHOT=<folder> saves a picture of each scarf a few seconds in.
         if let dir = ProcessInfo.processInfo.environment["SCARVES_SNAPSHOT"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
@@ -103,10 +99,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(submenu("Apps", apps))
 
         menu.addItem(.separator())
-        menu.addItem(item("Drag Windows by Their Scarves", #selector(toggleGrab), on: settings.grab))
-        if settings.grab && !WindowMover.allowed {
-            menu.addItem(item("Allow in Accessibility Settings…", #selector(openAccess), on: false))
-        }
         menu.addItem(item("Keyboard Shortcut ⌃⌥S", #selector(toggleShortcut), on: settings.shortcutEnabled))
         menu.addItem(item("Start at Login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
         menu.addItem(.separator())
@@ -131,14 +123,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleEnabled() { settings.enabled.toggle() }
-
-    /// Moving another app's window is the one thing here that macOS wants permission for.
-    @objc private func toggleGrab() {
-        settings.grab.toggle()
-        if settings.grab && !WindowMover.allowed { WindowMover.askForAccess() }
-    }
-
-    @objc private func openAccess() { WindowMover.openSettings() }
 
     @objc private func toggleShortcut() {
         settings.shortcutEnabled.toggle()

@@ -60,42 +60,8 @@ final class ScarfOverlay {
         deinit { window.orderOut(nil) }
     }
 
-    /// One invisible, mouse-catching window over a part of the scarf that can be grabbed.
-    private final class Grip {
-        let window: GripPanel
-        let view = GripView()
-
-        init() {
-            window = GripPanel(contentRect: NSRect(x: 0, y: 0, width: 10, height: 10),
-                               styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-            window.isOpaque = false
-            window.backgroundColor = .clear
-            window.hasShadow = false
-            window.hidesOnDeactivate = false
-            window.isReleasedWhenClosed = false
-            window.animationBehavior = .none
-            window.level = .normal
-            window.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
-            window.setAccessibilityElement(false)
-            // Catches nothing until its scarf is showing.
-            window.ignoresMouseEvents = true
-            window.contentView = view
-        }
-
-        deinit { window.orderOut(nil) }
-    }
-
     private var pieces: [Piece] = []
     private var placements: [Placement] = []
-    private var grips: [Grip] = []
-    private var gripRects: [CGRect] = []
-    private var grabbable = false
-    /// A drag in progress: the window being moved, and where it and the pointer started.
-    private var grab: (window: AXUIElement, pointer: NSPoint, origin: CGPoint)?
-    /// The app that owns the window this scarf is on.
-    var targetPID: pid_t = 0
-    /// Called whenever a drag by the scarf moves the window.
-    var onGrab: (() -> Void)?
     private(set) var style: ScarfStyle?
     private var builtSize: CGSize = .zero
     private var targetFrame: CGRect = .zero
@@ -115,19 +81,12 @@ final class ScarfOverlay {
     }
 
     /// The window numbers of this scarf's pieces.
-    var windowNumbers: [Int] {
-        pieces.map { $0.window.windowNumber } + grips.map { $0.window.windowNumber }
-    }
+    var windowNumbers: [Int] { pieces.map { $0.window.windowNumber } }
 
     /// Follow the target window. `frame` is in global CoreGraphics coordinates (top-left origin).
-    /// `grabbable` says whether the scarf should catch the mouse so the window can be dragged by it.
-    func update(frame: CGRect, colourway cw: Colourway, style newStyle: ScarfStyle, grabbable canGrab: Bool = false) {
+    func update(frame: CGRect, colourway cw: Colourway, style newStyle: ScarfStyle) {
         targetFrame = frame
         colourway = cw
-        if canGrab != grabbable {
-            grabbable = canGrab
-            if style != nil { layoutGrips() }
-        }
         if newStyle != style {
             // A different scarf or a different drape: the old pictures don't fit the new shape,
             // so fade out and come back once the new ones are knitted.
@@ -143,24 +102,56 @@ final class ScarfOverlay {
         applyFrames()
     }
 
+    /// Just above every ordinary window, and below anything that floats (palettes, picture in picture).
+    private static let liftedLevel = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue + 1)
+    private(set) var isLifted = false
+
+    /// Hold the scarf above every ordinary window. When a window is pressed, macOS puts it in
+    /// front of everything at its level, its own scarf included, and it stays there, casting its
+    /// shadow over the scarf, until the scarf can be put back: a flash. A lifted scarf can't be
+    /// covered that way. (Nothing is sent to macOS until the caller flushes.)
+    func lift() {
+        guard !isLifted else { return }
+        isLifted = true
+        for piece in pieces { piece.window.level = ScarfOverlay.liftedLevel }
+    }
+
+    /// Back to its usual place, directly above its own window.
+    func settle() {
+        guard isLifted else { return }
+        isLifted = false
+        for piece in pieces { piece.window.level = .normal }
+        placeAboveTarget()
+    }
+
+    /// Everything the scarf and its window cover, in global coordinates (top-left origin).
+    var extent: CGRect {
+        var r = targetFrame
+        for p in placements {
+            r = r.union(CGRect(x: targetFrame.minX + p.origin.x, y: targetFrame.minY + p.origin.y,
+                               width: p.size.width, height: p.size.height))
+        }
+        return r
+    }
+
     /// Put the scarf's windows directly above the window it belongs to.
     func placeAboveTarget() {
         for piece in pieces { piece.window.order(.above, relativeTo: Int(targetID)) }
-        for grip in grips { grip.window.order(.above, relativeTo: Int(targetID)) }
+        // Sent straight away rather than with the next screen update, so a scarf that has
+        // ended up beneath its window is back on top as soon as possible.
+        CATransaction.flush()
     }
 
     func show() {
         guard !isShown else { return }
         isShown = true
         if hasContents { fadeIn() }
-        syncGrips()
     }
 
     func hide() {
         guard isShown else { return }
         isShown = false
         setOpacity(0)
-        syncGrips()
     }
 
     private func setOpacity(_ value: Float) {
@@ -190,76 +181,16 @@ final class ScarfOverlay {
         style = newStyle
         builtSize = size
         let tail = ScarfLayout.tailLength(height: size.height, T: newStyle.T)
-        let plan = ScarfLayout.plan(size: size, T: newStyle.T, side: newStyle.side,
-                                    tailLength: tail, fit: newStyle.fit)
-        placements = plan.pieces
-        gripRects = plan.grips
+        placements = ScarfLayout.placements(size: size, T: newStyle.T, side: newStyle.side,
+                                            tailLength: tail, fit: newStyle.fit)
         if pieces.count != placements.count {
             // A different number of pieces (the short end comes or goes): start them afresh,
             // invisible until their pictures are ready.
             hasContents = false
             pieces = placements.map { _ in Piece() }
+            if isLifted { for piece in pieces { piece.window.level = ScarfOverlay.liftedLevel } }
         }
-        layoutGrips()
     }
-
-    // MARK: Dragging the window by its scarf
-
-    /// Make one grip window for each part of the scarf that can be grabbed (none if that's off).
-    private func layoutGrips() {
-        let wanted = grabbable ? gripRects.count : 0
-        // Leave them be in the middle of a drag: the one under the pointer must stay.
-        guard grips.count != wanted, grab == nil else { return }
-        grips = (0..<wanted).map { _ in
-            let grip = Grip()
-            grip.view.onDown = { [weak self] in self?.grabBegan(at: NSEvent.mouseLocation) }
-            grip.view.onDrag = { [weak self] in self?.grabMoved(to: NSEvent.mouseLocation) }
-            grip.view.onUp = { [weak self] in self?.grabEnded() }
-            return grip
-        }
-        syncGrips()
-    }
-
-    /// Grips catch the mouse only while their scarf is showing.
-    private func syncGrips() {
-        guard grab == nil else { return }
-        for grip in grips { grip.window.ignoresMouseEvents = !isShown }
-    }
-
-    /// The mouse went down on the scarf: bring the window forward, ready to drag it.
-    /// `pointer` is in screen coordinates (bottom-left origin).
-    @discardableResult
-    func grabBegan(at pointer: NSPoint) -> Bool {
-        guard let window = WindowMover.window(pid: targetPID, frame: targetFrame) else { return false }
-        grab = (window, pointer, targetFrame.origin)
-        WindowMover.bringForward(window, pid: targetPID)
-        onGrab?()
-        return true
-    }
-
-    @discardableResult
-    func grabMoved(to pointer: NSPoint) -> Bool {
-        guard let grab else { return false }
-        var to = CGPoint(x: grab.origin.x + pointer.x - grab.pointer.x,
-                         y: grab.origin.y - (pointer.y - grab.pointer.y))
-        // Like an ordinary drag, the window's top can't go up under the menu bar.
-        if let screen = NSScreen.screens.first(where: { NSMouseInRect(pointer, $0.frame, false) }),
-           let primaryHeight = NSScreen.screens.first?.frame.height {
-            to.y = max(to.y, primaryHeight - screen.visibleFrame.maxY)
-        }
-        let moved = WindowMover.move(grab.window, to: to)
-        onGrab?()
-        return moved
-    }
-
-    func grabEnded() {
-        grab = nil
-        layoutGrips()
-        syncGrips()
-        onGrab?()
-    }
-
-    var gripCount: Int { grips.count }
 
     /// All knitting happens here, one scarf at a time, off the main thread.
     static let artQueue = DispatchQueue(label: "window-scarves.knitting", qos: .userInitiated)
@@ -321,11 +252,6 @@ final class ScarfOverlay {
                 piece.image.frame = bounds
                 CATransaction.commit()
             }
-        }
-        for (grip, r) in zip(grips, gripRects) {
-            let ns = NSRect(x: targetFrame.minX + r.minX, y: primaryHeight - (targetFrame.minY + r.maxY),
-                            width: r.width, height: r.height)
-            if grip.window.frame != ns { grip.window.setFrame(ns, display: false) }
         }
     }
 

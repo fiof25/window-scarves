@@ -47,7 +47,6 @@ Click 🧣 in the menu bar for the rest:
 - **Thickness**: Slim, Cozy or Chunky
 - **Windows**: every window, or only the front one
 - **Apps**: untick an app to leave its windows bare
-- **Drag Windows by Their Scarves**: grab a scarf to move its window (see below)
 - **Keyboard Shortcut ⌃⌥S**: turn the shortcut off if you don't want it
 - **Start at Login**: open Window Scarves automatically when you log in
 
@@ -55,23 +54,16 @@ Not every window gets one. A window that fills the whole screen goes bare. So do
 
 The scarf stays on the window's top edge, so it never covers the red, yellow and green buttons. If there's no room on screen beside a window, the long end moves to the other side, the short end is left off, and as a last resort the long end tucks just inside the window's right edge.
 
-### Dragging a window by its scarf
-
-Normally the scarf is click-through: a click on it lands on whatever is behind it. Turn on **Drag Windows by Their Scarves** and the scarf becomes a handle. Click it to bring its window forward, or drag it to move the window.
-
-This is the one feature that needs a permission. macOS only lets an app move another app's windows if you allow it under **System Settings → Privacy & Security → Accessibility**, and it asks you the first time you turn the option on. Leave the option off and Window Scarves needs no permissions at all. (If you build the app yourself, macOS treats each new build as a different app, so you'll need to remove it from that list and allow it again after rebuilding.)
-
-The grab areas cover the scarf along the top of the window and the ends hanging beside it. They stop a few points into the title bar, so the window's buttons, tabs and toolbar still get their own clicks, and an end that's tucked inside the window isn't a handle.
-
 When you click the desktop and macOS sweeps your windows to the edges of the screen, the scarves slip off while the windows are in flight and settle back on once they land, both on the way out and on the way back.
 
 ## How it works
 
-Window Scarves uses only public macOS APIs, and it doesn't need any permissions (unless you turn on dragging windows by their scarves, which uses the Accessibility API to move them).
+Window Scarves uses only public macOS APIs, and it doesn't need any permissions.
 
 - `CGWindowListCopyWindowInfo` reports where every window is and how they're stacked.
 - Each scarf is a few small transparent, click-through windows, ordered directly above the window it's worn by. They cover only the scarf, so nothing invisible sits over the app's own content, and windows in front still cover the scarf, just like real fabric.
 - The app checks the windows 10 times a second when nothing is happening, and 120 times a second while anything is moving, so scarves keep up with drags and resizes without wasting power.
+- Pressing on a window, to drag it, resize it or just click in it, makes macOS put that window in front of everything at its level, its own scarf included, and for a frame or two the scarf would be covered: a flash. So while the pointer is moving over a window, that window's scarf is lifted just above the ordinary windows, where a press can't cover it, and it settles back a couple of seconds after the pointer stops or leaves. This only happens when nothing in front overlaps the scarf, so lifting it changes nothing you can see.
 - Scarves are made into images in the background and remade as a window is resized. The knitted ones are made in several strips at once on separate processor cores. The mohair ones are mostly see-through drawing, which macOS can't safely do on several cores at once, so they're made in one go. Scarves fade in rather than popping, and the app idles at about 1 to 2% CPU.
 
 Render the preview images without touching your real windows:

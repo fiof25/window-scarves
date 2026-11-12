@@ -38,16 +38,6 @@ enum SelfTest {
                                 }
                                 expect(g.path.allSatisfy { p in g.rects.contains { $0.contains(p) } },
                                        "scarf goes outside its pieces: \(label)")
-                                // Where it can be grabbed: on the scarf, and clear of the window's controls.
-                                let inside = CGRect(x: 0, y: 6, width: w, height: 5000)
-                                let pieces = g.rects.reduce(CGRect.null) { $0.union($1) }
-                                expect(!g.grips.isEmpty && g.grips.count <= 3, "\(g.grips.count) grips: \(label)")
-                                expect(g.grips.allSatisfy {
-                                    $0.width >= 1 && $0.height >= 1 && $0 == $0.integral && pieces.contains($0)
-                                        && $0.intersection(inside).isEmpty
-                                }, "a grip is off the scarf or over the window: \(label) \(g.grips)")
-                                expect(g.grips[0].width >= min(w, 100) && g.grips[0].minY < 0,
-                                       "no grip along the top: \(label)")
                             }
                         }
                     }

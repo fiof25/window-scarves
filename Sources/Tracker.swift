@@ -38,10 +38,6 @@ final class Tracker {
     private var probeWindow: OverlayWindow?
     private var probing: (child: CGWindowID, parent: CGWindowID, since: CFTimeInterval)?
 
-    /// Whether scarves can be grabbed right now: the option is on and macOS allows it.
-    private var grabAllowed = false
-    private var grabChecked: CFTimeInterval = -10
-    private let testGrips = ProcessInfo.processInfo.environment["SCARVES_TEST_GRIPS"] != nil
     /// How long a swept window must hold still before its scarf comes back.
     private static let sweepRest = 0.15
 
@@ -66,8 +62,34 @@ final class Tracker {
 
         // A click often raises, closes or starts dragging a window: look closely straight away.
         // (If this monitor never fires, the timer's own check of the mouse button covers it.)
-        monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] _ in
-            self?.wake()
+        monitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown, .leftMouseUp]) { [weak self] event in
+            switch event.type {
+            case .mouseMoved:
+                self?.hovered(at: NSEvent.mouseLocation)
+            case .leftMouseDown:
+                self?.pressed(at: NSEvent.mouseLocation, commandHeld: event.modifierFlags.contains(.command))
+                self?.wake()
+            default:
+                self?.wake()
+            }
+        }
+
+        // Debugging aid (SCARVES_TEST_PRESS): another program can stand in for the mouse by
+        // posting a notification: "hover:x,y", "press:x,y" or "wake".
+        if ProcessInfo.processInfo.environment["SCARVES_TEST_PRESS"] != nil {
+            DistributedNotificationCenter.default().addObserver(
+                forName: Notification.Name("com.fiof25.windowscarves.test-press"), object: nil, queue: .main
+            ) { [weak self] note in
+                let words = (note.object as? String ?? "").split(separator: ":")
+                let xy = (words.last ?? "").split(separator: ",").compactMap { Double($0) }
+                if words.first == "hover", xy.count == 2 {
+                    self?.lastHover = 0
+                    self?.hovered(at: NSPoint(x: xy[0], y: xy[1]))
+                } else {
+                    if words.first == "press", xy.count == 2 { self?.pressed(at: NSPoint(x: xy[0], y: xy[1]), commandHeld: false) }
+                    self?.wake()
+                }
+            }
         }
 
         let nc = NSWorkspace.shared.notificationCenter
@@ -83,6 +105,109 @@ final class Tracker {
         ) { [weak self] _ in self?.wake() }
 
         refresh()
+    }
+
+    // MARK: Lifting a scarf ahead of a press
+    //
+    // Pressing on a window (to drag it, resize it, or just click in it) makes macOS put that
+    // window in front of everything at its level, including its own scarf, which sits directly
+    // above it. The scarf is back on top a moment later, but for a frame or two the window covers
+    // the part of the scarf that overlaps it and casts its shadow over the rest: a flash.
+    //
+    // Reacting to the press is too late. So the scarf of the window under the pointer is lifted
+    // just above the ordinary window level while the pointer is moving over it, where a press
+    // can't cover it, and settles back shortly after the pointer stops or leaves. That is only
+    // done while nothing in front overlaps the scarf, so lifting changes nothing you can see.
+
+    /// The scarf that's lifted, until when, and (after a press on a window behind others) how
+    /// long to wait for that window to come forward.
+    private var lifted: (id: CGWindowID, until: CFTimeInterval, grace: CFTimeInterval)?
+    private var lastSizeable: [Target] = []
+    private var lastHover: CFTimeInterval = 0
+    /// How long a scarf stays lifted after the pointer last moved over its window.
+    private static let liftHold = 2.5
+
+    /// Whether any real-sized window in front overlaps this window's scarf. `windows` is front to back.
+    private func isObstructed(_ t: Target, by windows: [Target]) -> Bool {
+        // With room to spare, so a window being dragged towards it counts before it arrives.
+        let reach = (overlays[t.id]?.extent ?? t.frame.insetBy(dx: -100, dy: -100)).insetBy(dx: -48, dy: -48)
+        for w in windows {
+            if w.id == t.id { return false }
+            // Its own drop-downs and popovers sit beneath its scarf anyway.
+            if w.pid == t.pid && attached.contains(w.id) { continue }
+            if w.frame.intersects(reach) { return true }
+        }
+        return false
+    }
+
+    private func lift(_ id: CGWindowID, _ overlay: ScarfOverlay, grace: CFTimeInterval) {
+        let clock = CACurrentMediaTime()
+        if let old = lifted, old.id != id { overlays[old.id]?.settle() }
+        overlay.lift()
+        lifted = (id, clock + Tracker.liftHold, grace)
+        // macOS would hold these changes back until the app next updates the screen, several
+        // milliseconds away. Send them now.
+        CATransaction.flush()
+    }
+
+    private func settleLifted() {
+        guard let old = lifted else { return }
+        overlays[old.id]?.settle()
+        lifted = nil
+    }
+
+    /// The window a press at `point` (screen coordinates, bottom-left origin) would land on.
+    /// Scarves are click-through, so they never count.
+    private func window(at point: NSPoint) -> CGWindowID? {
+        CGWindowID(exactly: NSWindow.windowNumber(at: point, belowWindowWithWindowNumber: 0))
+    }
+
+    /// The pointer moved, with no button held.
+    private func hovered(at point: NSPoint) {
+        guard settings.enabled, !mouseDown else { return }
+        let clock = CACurrentMediaTime()
+        // The pointer reports many times a second; a few looks are plenty.
+        guard clock - lastHover >= 0.04 else { return }
+        lastHover = clock
+        guard let id = window(at: point) else { return }
+        if lifted?.id == id {
+            lifted?.until = clock + Tracker.liftHold
+            return
+        }
+        guard let overlay = overlays[id], overlay.isShown,
+              let t = lastSizeable.first(where: { $0.id == id }), !isObstructed(t, by: lastSizeable) else { return }
+        lift(id, overlay, grace: 0)
+        log("pointer over \(t.owner): scarf lifted")
+    }
+
+    /// The mouse button went down.
+    private func pressed(at point: NSPoint, commandHeld: Bool) {
+        guard settings.enabled else { return }
+        let clock = CACurrentMediaTime()
+        let id = window(at: point)
+        if let now = lifted {
+            // On the window whose scarf is already lifted (or on its edge, to resize it):
+            // nothing to do, which is the point.
+            let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+            let p = CGPoint(x: point.x, y: primaryHeight - point.y)
+            if now.id == id || lastSeen[now.id]?.insetBy(dx: -8, dy: -8).contains(p) == true {
+                lifted?.until = clock + Tracker.liftHold
+                log("pressed: scarf already lifted")
+                return
+            }
+        }
+        // Command-clicking works a window without bringing it forward.
+        guard let id, !commandHeld else { return }
+        if let overlay = overlays[id], overlay.isShown {
+            // A window behind others (or the pointer hadn't moved lately). It's about to come
+            // forward: lift its scarf now and hope to beat it there.
+            lift(id, overlay, grace: clock + 0.6)
+            log("pressed a window: scarf lifted at the last moment (\(id))")
+        } else if lastSizeable.contains(where: { $0.id == id }) {
+            // A bare window is coming forward: nothing may stay lifted over it.
+            settleLifted()
+            CATransaction.flush()
+        }
     }
 
     /// Something just happened that may move windows: check now and keep checking quickly for a bit.
@@ -121,7 +246,8 @@ final class Tracker {
             idleTicks += 1
             // With the button held, a drag could start at any moment, so look on every tick.
             // The same goes while the desktop is revealed: the windows can fly back any time.
-            if mouseDown || revealActive || idleTicks % Tracker.idleStride == 0 { refresh() }
+            // And while a scarf is lifted, so it comes down promptly if something moves over it.
+            if mouseDown || revealActive || lifted != nil || idleTicks % Tracker.idleStride == 0 { refresh() }
         }
     }
 
@@ -134,31 +260,6 @@ final class Tracker {
         }
     }
 
-    /// Debugging aid (SCARVES_TEST_GRAB): drag the front window a little way by its scarf and
-    /// back again, exactly as the mouse would, and report how it went.
-    func rehearseGrab() {
-        let front = lastOrder.first.flatMap { id in overlays[id].map { (id, $0) } }
-        guard let (id, overlay) = front, let from = lastSeen[id] else { return log("rehearsal: no scarf to grab") }
-        log("rehearsal: allowed \(grabAllowed), grips \(overlay.gripCount), window at \(from.origin)")
-        let start = NSPoint(x: 400, y: 400)
-        guard overlay.grabBegan(at: start) else { return log("rehearsal: couldn't find the window to move") }
-        var step = 0
-        Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
-            guard let self else { return timer.invalidate() }
-            step += 1
-            // Out over 20 steps, hold for 30, back over 20.
-            let k = CGFloat(step <= 20 ? step : (step <= 50 ? 20 : max(0, 70 - step)))
-            let ok = overlay.grabMoved(to: NSPoint(x: start.x + 4 * k, y: start.y - 3 * k))
-            if step == 20 || step == 50 || step == 70 {
-                self.log("rehearsal: step \(step), moved \(ok), window now at \(self.lastSeen[id]?.origin ?? .zero)")
-            }
-            if step >= 70 {
-                timer.invalidate()
-                overlay.grabEnded()
-            }
-        }
-    }
-
     func removeAll() {
         overlays.removeAll()
         lastSeen.removeAll()
@@ -167,6 +268,8 @@ final class Tracker {
         sweptAt.removeAll()
         attached.removeAll()
         standalone.removeAll()
+        lifted = nil
+        lastSizeable.removeAll()
         endProbe()
     }
 
@@ -321,6 +424,8 @@ final class Tracker {
             if rect.width < 200 || rect.height < 140 { continue }
             sizeable.append(Target(id: id, frame: rect, owner: owner, pid: pid, index: i))
         }
+        lastSizeable = sizeable
+
         // Which windows are attached to another one? Forget the answers for windows that have
         // gone, read the answer to the question in progress, then ask the next one.
         let clock = CACurrentMediaTime()
@@ -437,22 +542,11 @@ final class Tracker {
         let now = Date()
         for (id, overlay) in overlays where seen[id] == nil {
             overlay.hide()
+            if lifted?.id == id { settleLifted() }
             // Forget windows that have been gone a while (closed, or on another Space for ages).
             if now.timeIntervalSince(overlay.lastSeen) > 60 {
                 overlays[id] = nil
             }
-        }
-
-        // Dragging by the scarf needs Accessibility permission, which can be given or taken away
-        // at any time, so look again every second or so.
-        if !settings.grab {
-            grabAllowed = false
-        } else if clock - grabChecked > 1 {
-            // (SCARVES_TEST_GRIPS puts the grips up without permission, to test where they sit.)
-            let allowed = WindowMover.allowed || testGrips
-            if allowed != grabAllowed { log("dragging by the scarf \(allowed ? "allowed" : "not allowed yet")") }
-            grabAllowed = allowed
-            grabChecked = clock
         }
 
         let thickness = settings.thickness.points
@@ -464,6 +558,7 @@ final class Tracker {
                     // takes them.
                     if let overlay = overlays[t.id] {
                         if overlay.isShown { log("in flight, scarf off: \(t.owner) \(t.frame.origin)") }
+                        if lifted?.id == t.id { settleLifted() }
                         overlay.hide()
                         overlay.lastSeen = now
                     }
@@ -477,12 +572,10 @@ final class Tracker {
             }
             let overlay = overlays[t.id] ?? {
                 let o = ScarfOverlay(targetID: t.id)
-                o.onGrab = { [weak self] in self?.wake() }
                 overlays[t.id] = o
                 return o
             }()
             overlay.lastSeen = now
-            overlay.targetPID = t.pid
             let cw = settings.colourway(forApp: t.owner)
             let T = (thickness * cw.weight).rounded()
 
@@ -500,7 +593,24 @@ final class Tracker {
                                                   roomRight: screen.maxX - t.frame.maxX, T: T)
                 style = ScarfStyle(colourway: cw.id, T: T, side: side, fit: fit)
             }
-            overlay.update(frame: t.frame, colourway: cw, style: style, grabbable: grabAllowed)
+            overlay.update(frame: t.frame, colourway: cw, style: style)
+
+            if let now = lifted, now.id == t.id {
+                // Lifted above the ordinary windows (see `hovered`). It stays there while the
+                // pointer has been on its window lately, or a button is held (a drag), and
+                // nothing in front overlaps it; except that just after a press on a window
+                // behind others, it waits for that window to come forward.
+                let wanted = clock < now.until || mouseDown
+                let clear = clock < now.grace || !isObstructed(t, by: sizeable)
+                if !(wanted && clear) {
+                    log("scarf settles: \(t.owner)\(clear ? "" : " (something moved in front)")")
+                    settleLifted()
+                    overlay.orderMisses = 0
+                    overlay.lastOrder = clock
+                }
+                overlay.show()
+                continue
+            }
 
             // Keep the scarf directly above its own window: every one of its pieces should be
             // in the block of windows immediately in front of it.
