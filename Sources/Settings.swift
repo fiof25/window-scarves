@@ -46,6 +46,13 @@ final class Settings {
         set { d.set(newValue, forKey: "shortcutEnabled") }
     }
 
+    /// Whether a window can be dragged by its scarf. Off unless asked for, because it's the one
+    /// thing that needs a permission (Accessibility).
+    var grab: Bool {
+        get { d.bool(forKey: "grab") }
+        set { d.set(newValue, forKey: "grab"); changed() }
+    }
+
     /// Apps whose windows go without a scarf.
     var skippedApps: Set<String> {
         get { Set(d.stringArray(forKey: "skippedApps") ?? []) }

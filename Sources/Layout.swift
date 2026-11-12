@@ -49,6 +49,11 @@ struct ScarfGeometry {
     /// Disjoint image rects that together hold the whole scarf: the top run first,
     /// then one for each hanging end.
     let rects: [CGRect]
+    /// Where the scarf can be grabbed to drag its window: the run along the top, and the parts
+    /// of the hanging ends that are beside the window. They keep clear of the window's own
+    /// controls: only the top few points of the title bar are covered, and nothing inside the
+    /// window's sides, so a tucked-in end isn't a handle.
+    let grips: [CGRect]
 
     var fringeLength: CGFloat { (T * 0.95).rounded() }
 
@@ -102,6 +107,27 @@ struct ScarfGeometry {
                               height: ceil(b.maxY + below - split)))
         }
         rects = out
+
+        // Worked out with the long end on the right, like the path, then mirrored.
+        let half = 0.5 * T
+        let cap = min(0.2 * T, 6)                       // how far down the title bar a grip reaches
+        let gripTop = yT - half + 0.25 * sag            // the top run dips in the middle; split the difference
+        // Without a short end the scarf starts on the top edge.
+        let x0 = fit.shortEnd ? xL - half : xL + R
+        var g = [CGRect(x: x0, y: gripTop, width: xR + half - x0, height: cap - gripTop)]
+        if fit.shortEnd {
+            g.append(CGRect(x: xL - half, y: cap, width: half - xL, height: yT + R + short - cap))
+        }
+        let longStart = max(xR - half, w)
+        if xR + half - longStart >= 6 {
+            g.append(CGRect(x: longStart, y: cap, width: xR + half - longStart, height: yT + R + L - cap))
+        }
+        grips = g.map { r in
+            let m = mirror ? CGRect(x: w - r.maxX, y: r.minY, width: r.width, height: r.height) : r
+            // Whole points, rounded inwards so a grip never creeps over the window.
+            let x1 = m.minX.rounded(.up), y1 = m.minY.rounded(.up)
+            return CGRect(x: x1, y: y1, width: max(1, m.maxX.rounded(.down) - x1), height: max(1, m.maxY.rounded(.down) - y1))
+        }
     }
 
     /// The scarf's width along its length: it ripples a little, like soft fabric.
@@ -163,6 +189,17 @@ enum ScarfLayout {
             Placement(index: i, size: r.size, origin: r.origin, w: size.width, T: T, side: side,
                       tailLength: tailLength, fit: fit)
         }
+    }
+
+    /// The pieces, and where the scarf can be grabbed (see `ScarfGeometry.grips`).
+    static func plan(size: CGSize, T: CGFloat, side: KnotSide, tailLength: CGFloat,
+                     fit: ScarfFit = .roomy) -> (pieces: [Placement], grips: [CGRect]) {
+        let g = ScarfGeometry(w: size.width, T: T, side: side, tailLength: tailLength, fit: fit)
+        let pieces = g.rects.enumerated().map { i, r in
+            Placement(index: i, size: r.size, origin: r.origin, w: size.width, T: T, side: side,
+                      tailLength: tailLength, fit: fit)
+        }
+        return (pieces, g.grips)
     }
 
     /// The smallest rect (window-local, top-left origin) holding the window and every piece.

@@ -31,6 +31,17 @@ final class Tracker {
     private var revealActive = false
     /// Windows being swept aside or brought back by macOS, and when each last moved.
     private var sweptAt: [CGWindowID: CFTimeInterval] = [:]
+    /// Windows found to be attached to another window of their app (drop-downs, popovers,
+    /// sheets), and windows found to stand on their own. See `startProbe`.
+    private var attached: Set<CGWindowID> = []
+    private var standalone: Set<CGWindowID> = []
+    private var probeWindow: OverlayWindow?
+    private var probing: (child: CGWindowID, parent: CGWindowID, since: CFTimeInterval)?
+
+    /// Whether scarves can be grabbed right now: the option is on and macOS allows it.
+    private var grabAllowed = false
+    private var grabChecked: CFTimeInterval = -10
+    private let testGrips = ProcessInfo.processInfo.environment["SCARVES_TEST_GRIPS"] != nil
     /// How long a swept window must hold still before its scarf comes back.
     private static let sweepRest = 0.15
 
@@ -123,12 +134,81 @@ final class Tracker {
         }
     }
 
+    /// Debugging aid (SCARVES_TEST_GRAB): drag the front window a little way by its scarf and
+    /// back again, exactly as the mouse would, and report how it went.
+    func rehearseGrab() {
+        let front = lastOrder.first.flatMap { id in overlays[id].map { (id, $0) } }
+        guard let (id, overlay) = front, let from = lastSeen[id] else { return log("rehearsal: no scarf to grab") }
+        log("rehearsal: allowed \(grabAllowed), grips \(overlay.gripCount), window at \(from.origin)")
+        let start = NSPoint(x: 400, y: 400)
+        guard overlay.grabBegan(at: start) else { return log("rehearsal: couldn't find the window to move") }
+        var step = 0
+        Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
+            guard let self else { return timer.invalidate() }
+            step += 1
+            // Out over 20 steps, hold for 30, back over 20.
+            let k = CGFloat(step <= 20 ? step : (step <= 50 ? 20 : max(0, 70 - step)))
+            let ok = overlay.grabMoved(to: NSPoint(x: start.x + 4 * k, y: start.y - 3 * k))
+            if step == 20 || step == 50 || step == 70 {
+                self.log("rehearsal: step \(step), moved \(ok), window now at \(self.lastSeen[id]?.origin ?? .zero)")
+            }
+            if step >= 70 {
+                timer.invalidate()
+                overlay.grabEnded()
+            }
+        }
+    }
+
     func removeAll() {
         overlays.removeAll()
         lastSeen.removeAll()
         lastOrder.removeAll()
         settling.removeAll()
         sweptAt.removeAll()
+        attached.removeAll()
+        standalone.removeAll()
+        endProbe()
+    }
+
+    // MARK: Attached windows
+
+    /// Find out whether `child` is attached to `parent`, a window of the same app beneath it.
+    ///
+    /// macOS keeps an attached window (a drop-down, popover or sheet) glued directly above its
+    /// parent, and won't let anything be slotted in between. So an invisible one-point window
+    /// is ordered "directly above the parent": if it lands above the child as well, the child
+    /// is attached; if it lands between the two, the child is a window in its own right. The
+    /// answer is read from the window list on the next check. This works for windows of any
+    /// size and needs no permission.
+    private func startProbe(child: Target, parent: Target, at clock: CFTimeInterval, screens: [CGRect]) {
+        let probe = probeWindow ?? {
+            let w = OverlayWindow(contentRect: NSRect(x: 0, y: 0, width: 1, height: 1),
+                                  styleMask: .borderless, backing: .buffered, defer: false)
+            w.isOpaque = false
+            w.backgroundColor = .clear
+            w.hasShadow = false
+            w.ignoresMouseEvents = true
+            w.isReleasedWhenClosed = false
+            w.animationBehavior = .none
+            w.level = .normal
+            w.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
+            w.setAccessibilityElement(false)
+            probeWindow = w
+            return w
+        }()
+        // It has to be on a screen to show up in the window list.
+        let onScreen = screens.lazy.map { $0.intersection(parent.frame) }
+            .first { !$0.isNull && $0.width >= 2 && $0.height >= 2 } ?? parent.frame
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        probe.setFrame(NSRect(x: onScreen.midX.rounded(), y: primaryHeight - onScreen.midY.rounded(), width: 1, height: 1),
+                       display: false)
+        probe.order(.above, relativeTo: Int(parent.id))
+        probing = (child.id, parent.id, clock)
+    }
+
+    private func endProbe() {
+        probeWindow?.orderOut(nil)
+        probing = nil
     }
 
     struct Target {
@@ -218,12 +298,14 @@ final class Tracker {
         var targets: [Target] = []
         var apps: Set<String> = []
         var revealed = false
+        var pidAt = [pid_t](repeating: -1, count: info.count)   // who owns each entry in the list
 
         for (i, w) in info.enumerated() {
             guard let num = w[kCGWindowNumber] as? Int, let id = CGWindowID(exactly: num) else { continue }
             index[id] = i
-            guard let layer = w[kCGWindowLayer] as? Int,
-                  let pid = w[kCGWindowOwnerPID] as? Int32, pid != myPID else { continue }
+            guard let layer = w[kCGWindowLayer] as? Int, let pid = w[kCGWindowOwnerPID] as? Int32 else { continue }
+            pidAt[i] = pid
+            if pid == myPID { continue }
             let owner = w[kCGWindowOwnerName] as? String ?? ""
             if layer != 0 {
                 if !revealed, owner == "WindowManager", let bounds = w[kCGWindowBounds] as? NSDictionary,
@@ -239,7 +321,49 @@ final class Tracker {
             if rect.width < 200 || rect.height < 140 { continue }
             sizeable.append(Target(id: id, frame: rect, owner: owner, pid: pid, index: i))
         }
+        // Which windows are attached to another one? Forget the answers for windows that have
+        // gone, read the answer to the question in progress, then ask the next one.
+        let clock = CACurrentMediaTime()
+        if !attached.isEmpty { attached = attached.filter { index[$0] != nil } }
+        if !standalone.isEmpty { standalone = standalone.filter { index[$0] != nil } }
+        let probeIndex = probeWindow.flatMap { CGWindowID(exactly: $0.windowNumber) }.flatMap { index[$0] }
+        if let p = probing {
+            if let pi = probeIndex, let ci = index[p.child], index[p.parent] != nil {
+                if pi < ci {
+                    attached.insert(p.child)
+                    log("window \(p.child) is attached to \(p.parent): no scarf")
+                } else {
+                    standalone.insert(p.child)
+                    log("window \(p.child) stands on its own")
+                }
+                endProbe()
+            } else if index[p.child] == nil || index[p.parent] == nil || clock - p.since > 0.4 {
+                // No answer (a window went away, or the probe never showed): judge it by size instead.
+                if index[p.child] != nil { standalone.insert(p.child) }
+                endProbe()
+            }
+        }
+        // Any window resting directly on another of the same app needs an answer. Work from
+        // the back, so that the windows beneath the one being asked about are already known.
+        var undecided: Set<CGWindowID> = []
+        var nextProbe: (child: Target, parent: Target)?
+        for k in sizeable.indices.reversed() where k + 1 < sizeable.count {
+            let w = sizeable[k]
+            guard sizeable[k + 1].pid == w.pid, !attached.contains(w.id), !standalone.contains(w.id) else { continue }
+            undecided.insert(w.id)
+            if nextProbe == nil {
+                // Ask about the window at the bottom of the stack it's resting on.
+                var j = k + 1
+                while attached.contains(sizeable[j].id), j + 1 < sizeable.count, sizeable[j + 1].pid == w.pid { j += 1 }
+                nextProbe = (w, sizeable[j])
+            }
+        }
+        if probing == nil, let next = nextProbe { startProbe(child: next.child, parent: next.parent, at: clock, screens: screens) }
+        if !undecided.isEmpty { stayFast(0.3) }
+
         for (k, w) in sizeable.enumerated() {
+            // A drop-down, popover or sheet belongs to the window it's attached to.
+            if attached.contains(w.id) { continue }
             // A window that fills the screen (full screen, or maximised edge to edge) goes bare.
             if Tracker.fillsScreen(w.frame, screens) { continue }
             // So do popovers, hover cards and small dialogs sitting on top of their app's window.
@@ -256,9 +380,10 @@ final class Tracker {
         // A window that has only just appeared may still be animating open, and macOS reports
         // it at the wrong size while it does. Wait until it has held still for a moment before
         // giving it a scarf, so the scarf is made once, for the right size.
-        let clock = CACurrentMediaTime()
         targets = targets.filter { t in
             if overlays[t.id] != nil { return true }
+            // Not yet known whether it's a window of its own or part of another: wait.
+            if undecided.contains(t.id) { return false }
             if let first = settling[t.id], first.frame == t.frame {
                 if clock - first.since >= 0.18 {
                     settling[t.id] = nil
@@ -318,6 +443,18 @@ final class Tracker {
             }
         }
 
+        // Dragging by the scarf needs Accessibility permission, which can be given or taken away
+        // at any time, so look again every second or so.
+        if !settings.grab {
+            grabAllowed = false
+        } else if clock - grabChecked > 1 {
+            // (SCARVES_TEST_GRIPS puts the grips up without permission, to test where they sit.)
+            let allowed = WindowMover.allowed || testGrips
+            if allowed != grabAllowed { log("dragging by the scarf \(allowed ? "allowed" : "not allowed yet")") }
+            grabAllowed = allowed
+            grabChecked = clock
+        }
+
         let thickness = settings.thickness.points
         let visible = visibleRectsCG()
         for t in targets {
@@ -340,10 +477,12 @@ final class Tracker {
             }
             let overlay = overlays[t.id] ?? {
                 let o = ScarfOverlay(targetID: t.id)
+                o.onGrab = { [weak self] in self?.wake() }
                 overlays[t.id] = o
                 return o
             }()
             overlay.lastSeen = now
+            overlay.targetPID = t.pid
             let cw = settings.colourway(forApp: t.owner)
             let T = (thickness * cw.weight).rounded()
 
@@ -361,14 +500,23 @@ final class Tracker {
                                                   roomRight: screen.maxX - t.frame.maxX, T: T)
                 style = ScarfStyle(colourway: cw.id, T: T, side: side, fit: fit)
             }
-            overlay.update(frame: t.frame, colourway: cw, style: style)
+            overlay.update(frame: t.frame, colourway: cw, style: style, grabbable: grabAllowed)
 
             // Keep the scarf directly above its own window: every one of its pieces should be
             // in the block of windows immediately in front of it.
             let numbers = overlay.windowNumbers
             let positions = numbers.compactMap { n in CGWindowID(exactly: n).flatMap { index[$0] } }
-            let inPlace = !numbers.isEmpty && positions.count == numbers.count
-                && positions.allSatisfy { $0 < t.index && $0 >= t.index - numbers.count }
+            var inPlace = !numbers.isEmpty && positions.count == numbers.count
+                && positions.allSatisfy { $0 < t.index }
+            if inPlace, let top = positions.min() {
+                // Nothing may sit between the scarf and its window, except windows attached to
+                // that window (macOS keeps those directly above it, beneath the scarf) and the probe.
+                let own = Set(positions)
+                for i in top..<t.index where !own.contains(i) && pidAt[i] != t.pid && i != probeIndex {
+                    inPlace = false
+                    break
+                }
+            }
             if inPlace {
                 overlay.orderMisses = 0
             } else {
