@@ -52,8 +52,6 @@ func noise01(_ a: Int, _ b: Int, _ c: Int) -> CGFloat {
 enum Texture {
     /// Fine stockinette: columns of little V stitches.
     case knit
-    /// Chunky rib: a few fat columns of big stitches with soft grooves between them.
-    case rib
     /// Brushed mohair weave: no visible stitches, soft blended colour and lots of fuzz.
     case mohair
     /// Cable knit: three slim twisted rope cables side by side, with grooves between them.
@@ -63,7 +61,6 @@ enum Texture {
     var across: Int {
         switch self {
         case .knit: return 7
-        case .rib: return 5
         case .mohair: return 9
         case .cable: return 16
         }
@@ -73,7 +70,6 @@ enum Texture {
     var rowRatio: CGFloat {
         switch self {
         case .knit: return 0.8
-        case .rib: return 0.62
         case .mohair: return 1.0
         case .cable: return 0.78
         }
@@ -111,7 +107,6 @@ struct Colourway {
     var gap: Yarn {
         switch texture {
         case .knit: return base.shade(0.74)
-        case .rib: return base.shade(0.7)
         case .mohair: return base.shade(0.96)   // brushed fabric has no dark gaps
         case .cable: return base.mix(warmShadow, 0.5)   // warm, so pale yarn looks clean rather than grey
         }
@@ -168,12 +163,6 @@ enum Colourways {
                       warp: [(0.3, 0), (0.62, 1), (0.76, 2), (1.01, 0)],
                       weft: [(10, 0), (7, 1), (3, 2), (7, 1)]))
 
-    static let camel = Colourway(
-        id: "camel", name: "Camel",
-        blurb: "chunky rib knit in warm camel",
-        texture: .rib, base: Yarn(0xC59C6C), weight: 1.04, heather: 0.06, fringe: .chunky
-    ) { _, _, _, _ in Yarn(0xC59C6C) }
-
     static let mossCheck = Colourway(
         id: "moss-check", name: "Moss Check",
         blurb: "fuzzy mohair check in moss, butter and navy",
@@ -190,7 +179,7 @@ enum Colourways {
 
     /// Ordered so that the first few apps get a mix of textures.
     static let all: [Colourway] = [
-        lilacCheck, creamCable, rosehip, cocoaCheck, camel, mossCheck, blush,
+        lilacCheck, creamCable, rosehip, cocoaCheck, mossCheck, blush,
     ]
 
     /// Setting value meaning "give each app its own scarf".

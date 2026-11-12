@@ -27,9 +27,9 @@ final class Tracker {
     private var settling: [CGWindowID: (frame: CGRect, since: CFTimeInterval)] = [:]
 
     private static let fastInterval = 1.0 / 120
-    private static let idleInterval = 1.0 / 30
+    private static let idleInterval = 1.0 / 20
     /// While idle, look at the windows on every Nth tick (10 times a second).
-    private static let idleStride = 3
+    private static let idleStride = 2
 
     /// Things that draw normal-level windows but aren't really app windows.
     private let ignoredOwners: Set<String> = [
@@ -83,6 +83,8 @@ final class Tracker {
         let t = Timer(timeInterval: fast ? Tracker.fastInterval : Tracker.idleInterval, repeats: true) {
             [weak self] _ in self?.tick()
         }
+        // While idle, let macOS line this timer up with other work to save power.
+        t.tolerance = fast ? 0 : 0.012
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
@@ -119,7 +121,7 @@ final class Tracker {
         settling.removeAll()
     }
 
-    private struct Target {
+    struct Target {
         var id: CGWindowID
         var frame: CGRect
         var owner: String
@@ -145,7 +147,7 @@ final class Tracker {
 
     /// Whether a window covers a whole screen: it spans the full width, reaches the bottom, and
     /// starts at the top (or just below the menu bar or camera notch).
-    private static func fillsScreen(_ r: CGRect, _ screens: [CGRect]) -> Bool {
+    static func fillsScreen(_ r: CGRect, _ screens: [CGRect]) -> Bool {
         screens.contains {
             abs(r.minX - $0.minX) < 2 && abs(r.maxX - $0.maxX) < 2 && abs(r.maxY - $0.maxY) < 2
                 && r.minY - $0.minY < 60
@@ -155,7 +157,7 @@ final class Tracker {
     /// Whether a window looks like a popover, hover card, sheet or dialog rather than a window
     /// in its own right: it sits directly on top of a much bigger window from the same app and
     /// mostly within it. `below` is the windows behind it, front to back.
-    private static func isPopover(_ w: Target, above below: ArraySlice<Target>) -> Bool {
+    static func isPopover(_ w: Target, above below: ArraySlice<Target>) -> Bool {
         let area = w.frame.width * w.frame.height
         for parent in below {
             // Only windows of the same app directly beneath count; another app's window in
@@ -174,7 +176,7 @@ final class Tracker {
             return
         }
         guard let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
-            as? [[String: Any]] else { return }
+            as? [NSDictionary] else { return }
 
         let screens = screenRectsCG()
         let skipped = settings.skippedApps
@@ -184,15 +186,15 @@ final class Tracker {
         var apps: Set<String> = []
 
         for (i, w) in info.enumerated() {
-            guard let num = w[kCGWindowNumber as String] as? Int else { continue }
+            guard let num = w[kCGWindowNumber] as? Int else { continue }
             let id = CGWindowID(num)
             index[id] = i
-            guard (w[kCGWindowLayer as String] as? Int) == 0,
-                  let pid = w[kCGWindowOwnerPID as String] as? Int32, pid != myPID else { continue }
-            let owner = w[kCGWindowOwnerName as String] as? String ?? ""
+            guard (w[kCGWindowLayer] as? Int) == 0,
+                  let pid = w[kCGWindowOwnerPID] as? Int32, pid != myPID else { continue }
+            let owner = w[kCGWindowOwnerName] as? String ?? ""
             if ignoredOwners.contains(owner) { continue }
-            if let alpha = w[kCGWindowAlpha as String] as? Double, alpha < 0.1 { continue }
-            guard let bounds = w[kCGWindowBounds as String] as? NSDictionary,
+            if let alpha = w[kCGWindowAlpha] as? Double, alpha < 0.1 { continue }
+            guard let bounds = w[kCGWindowBounds] as? NSDictionary,
                   let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { continue }
             if rect.width < 200 || rect.height < 140 { continue }
             sizeable.append(Target(id: id, frame: rect, owner: owner, pid: pid, index: i))

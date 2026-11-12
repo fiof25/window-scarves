@@ -6,7 +6,7 @@ A little macOS menu-bar app that gives each of your windows a cosy scarf for aut
 
 ## The collection
 
-![All seven scarves: Lilac Check, Cream Cable, Rosehip, Cocoa Check, Camel, Moss Check and Blush](docs/colourways.png)
+![All six scarves: Lilac Check, Cream Cable, Rosehip, Cocoa Check, Moss Check and Blush](docs/colourways.png)
 
 Every app gets a different scarf. Choose **Shuffle** in the menu to deal them out again, or pick one scarf for every window.
 
@@ -61,7 +61,7 @@ Window Scarves uses only public macOS APIs, and it doesn't need any permissions.
 - `CGWindowListCopyWindowInfo` reports where every window is and how they're stacked.
 - Each scarf is its own transparent, click-through window, ordered directly above the window it's worn by. Windows in front still cover it, just like real fabric.
 - The app checks the windows 10 times a second when nothing is happening, and 120 times a second while anything is moving, so scarves keep up with drags and resizes without wasting power.
-- Scarves are knitted into images on a background thread and re-knitted as a window is resized. They fade in rather than popping, and the app idles at about 1% CPU.
+- Scarves are knitted into images in the background, in several strips at once on separate processor cores, and re-knitted as a window is resized. They fade in rather than popping, and the app idles at about 1% CPU.
 
 Render the preview images without touching your real windows:
 
@@ -69,10 +69,24 @@ Render the preview images without touching your real windows:
 "build/Window Scarves.app/Contents/MacOS/WindowScarves" --render docs
 ```
 
+To check the scarf-making code without touching any windows (thousands of checks, including that scarves knitted in parallel pieces match ones knitted whole):
+
+```sh
+"build/Window Scarves.app/Contents/MacOS/WindowScarves" --self-test
+```
+
 To see exactly what the app is drawing on your real windows, start it with `SCARVES_SNAPSHOT` set to a folder. A few seconds later it saves a picture of each scarf there:
 
 ```sh
 open --env SCARVES_SNAPSHOT=/tmp/scarves "build/Window Scarves.app"
+```
+
+## Taking it off
+
+Choose **Quit Window Scarves** from the 🧣 menu and drag the app to the Trash. To clear its saved settings as well:
+
+```sh
+defaults delete com.fiof25.windowscarves
 ```
 
 ## Ideas for later

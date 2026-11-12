@@ -102,6 +102,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Keyboard Shortcut ⌃⌥D", #selector(toggleShortcut), on: settings.shortcutEnabled))
         menu.addItem(item("Start at Login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
         menu.addItem(.separator())
+        if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
+            menu.addItem(NSMenuItem(title: "Window Scarves \(version)", action: nil, keyEquivalent: ""))
+        }
         menu.addItem(item("Quit Window Scarves", #selector(quit), on: false, key: "q"))
     }
 
@@ -182,6 +185,17 @@ if let i = args.firstIndex(of: "--render"), i + 1 < args.count {
                              fit: ScarfFit(tuck: 0.9 * 43, shortEnd: false))
     print(ok ? "Rendered previews into \(dir)" : "Rendering failed")
     exit(ok ? 0 : 1)
+}
+
+// `--self-test` checks the scarf-making code without touching any real windows.
+if args.contains("--self-test") {
+    exit(SelfTest.run() ? 0 : 1)
+}
+
+// Only one copy should run at a time, or every window would wear two scarves.
+if let id = Bundle.main.bundleIdentifier,
+   NSRunningApplication.runningApplications(withBundleIdentifier: id).contains(where: { $0.processIdentifier != getpid() }) {
+    exit(0)
 }
 
 let app = NSApplication.shared

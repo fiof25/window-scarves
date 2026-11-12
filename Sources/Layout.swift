@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 enum KnotSide: String, CaseIterable {
     case right, left
@@ -165,6 +166,21 @@ enum ScarfLayout {
         var r = CGRect(origin: .zero, size: window)
         for p in ps { r = r.union(CGRect(origin: p.origin, size: p.size)) }
         return r.insetBy(dx: -2, dy: -2).integral
+    }
+
+    /// Knit every piece of one scarf, all at the same time.
+    static func images(for ps: [Placement], colourway cw: Colourway, scale: CGFloat) -> [CGImage?] {
+        guard let first = ps.first else { return [] }
+        let g = ScarfGeometry(w: first.w, T: first.T, side: first.side, tailLength: first.tailLength, fit: first.fit)
+        var images = [CGImage?](repeating: nil, count: ps.count)
+        images.withUnsafeMutableBufferPointer { out in
+            DispatchQueue.concurrentPerform(iterations: ps.count) { i in
+                let index = ps[i].index
+                guard index < g.rects.count else { return }
+                out[i] = ScarfArt.piece(cw, g, rect: g.rects[index], key: "\(index)", scale: scale)
+            }
+        }
+        return images
     }
 
     static func image(for p: Placement, colourway cw: Colourway, scale: CGFloat) -> CGImage? {

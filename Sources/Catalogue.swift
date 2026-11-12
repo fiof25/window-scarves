@@ -122,7 +122,7 @@ enum Catalogue {
 
     /// Every scarf on its own little window, with just its name underneath.
     static func swatches(to path: String, scale: CGFloat = 2) -> Bool {
-        let cols = 4
+        let cols = 3
         let cell = CGSize(width: 390, height: 340)
         let all = Colourways.all
         let rows = (all.count + cols - 1) / cols

@@ -162,7 +162,7 @@ final class ScarfOverlay {
         rendering = true
         let ps = placements, cw = colourway, scale = scale, knitted = style
         ScarfOverlay.artQueue.async { [weak self] in
-            let images = ps.map { ScarfLayout.image(for: $0, colourway: cw, scale: scale) }
+            let images = ScarfLayout.images(for: ps, colourway: cw, scale: scale)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.rendering = false
