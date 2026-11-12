@@ -1,6 +1,6 @@
 # window-scarves
 
-A little macOS menu-bar app that gives each of your windows a cosy scarf for autumn. 🧣🍂
+A little macOS menu-bar app that gives each of your windows a cozy scarf for autumn. 🧣🍂
 
 ![Four windows, each wearing a different scarf: a lilac mohair check, a cream cable knit, a red fine knit and a cocoa check](docs/hero.png)
 
@@ -36,7 +36,7 @@ cd window-scarves
 
 This builds the app, copies **Window Scarves.app** into `~/Applications`, and opens it. Run `./build.sh` without `--install` to build into `build/` only, or `./build.sh --zip` to also make a zip for a release.
 
-## Make yourself cosy
+## Make yourself cozy
 
 Press **⌃⌥S** (Control-Option-S) anywhere to turn the scarves off and on.
 
@@ -44,7 +44,7 @@ Click 🧣 in the menu bar for the rest:
 
 - **Scarf**: Mixed, Shuffle, or one scarf for every window
 - **Long End**: on the right or on the left
-- **Thickness**: Slim, Cosy or Chunky
+- **Thickness**: Slim, Cozy or Chunky
 - **Windows**: every window, or only the front one
 - **Apps**: untick an app to leave its windows bare
 - **Keyboard Shortcut ⌃⌥S**: turn the shortcut off if you don't want it

@@ -31,7 +31,7 @@ final class Settings {
     }
 
     var thickness: Thickness {
-        get { Thickness(rawValue: d.string(forKey: "thickness") ?? "") ?? .cosy }
+        get { Thickness(rawValue: d.string(forKey: "thickness") ?? "") ?? .cozy }
         set { d.set(newValue.rawValue, forKey: "thickness"); changed() }
     }
 

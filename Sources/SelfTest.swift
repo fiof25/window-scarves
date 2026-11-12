@@ -50,7 +50,7 @@ enum SelfTest {
         var mostOff = 0
         for round in 0..<4 {
         for cw in Colourways.all {
-            let T = (Thickness.cosy.points * cw.weight).rounded()
+            let T = (Thickness.cozy.points * cw.weight).rounded()
             let g = ScarfGeometry(w: 900 + CGFloat(round) * 150, T: T, side: .right, tailLength: ScarfLayout.tailLength(height: 700, T: T))
             for (i, rect) in g.rects.enumerated() {
                 ScarfArt.clearCache()

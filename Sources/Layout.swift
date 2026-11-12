@@ -7,18 +7,18 @@ enum KnotSide: String, CaseIterable {
 }
 
 enum Thickness: String, CaseIterable {
-    case slim, cosy, chunky
+    case slim, cozy, chunky
     var points: CGFloat {
         switch self {
         case .slim: return 24
-        case .cosy: return 32
+        case .cozy: return 32
         case .chunky: return 40
         }
     }
     var title: String {
         switch self {
         case .slim: return "Slim"
-        case .cosy: return "Cosy"
+        case .cozy: return "Cozy"
         case .chunky: return "Chunky"
         }
     }
