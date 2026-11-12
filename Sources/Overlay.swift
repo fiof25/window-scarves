@@ -12,6 +12,7 @@ struct ScarfStyle: Equatable {
     var colourway: String
     var T: CGFloat
     var side: KnotSide
+    var fit: ScarfFit
 }
 
 /// One scarf, worn by one window. It sits directly above its window in the stacking order,
@@ -145,7 +146,7 @@ final class ScarfOverlay {
         lastBuild = CACurrentMediaTime()
         tailLength = ScarfLayout.tailLength(height: size.height, T: newStyle.T)
         placements = ScarfLayout.placements(size: size, T: newStyle.T, side: newStyle.side,
-                                            tailLength: tailLength)
+                                            tailLength: tailLength, fit: newStyle.fit)
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -185,7 +186,8 @@ final class ScarfOverlay {
     /// Move the existing pieces for a new window size without re-knitting them (used mid-resize).
     private func relayout(size: CGSize) {
         guard let style else { return }
-        placements = ScarfLayout.placements(size: size, T: style.T, side: style.side, tailLength: tailLength)
+        placements = ScarfLayout.placements(size: size, T: style.T, side: style.side, tailLength: tailLength,
+                                            fit: style.fit)
         extents = ScarfLayout.extents(placements, window: size)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -197,9 +199,8 @@ final class ScarfOverlay {
         let H = extents.height
         for (l, p) in zip(layers, placements) {
             l.bounds = CGRect(origin: .zero, size: p.size)
-            l.anchorPoint = CGPoint(x: p.anchorUnit.x, y: 1 - p.anchorUnit.y)
-            l.position = CGPoint(x: p.anchor.x - extents.minX, y: H - (p.anchor.y - extents.minY))
-            l.transform = CATransform3DMakeRotation(p.angle, 0, 0, 1)
+            l.anchorPoint = CGPoint(x: 0, y: 1)
+            l.position = CGPoint(x: p.origin.x - extents.minX, y: H - (p.origin.y - extents.minY))
         }
         positionButtons()
     }

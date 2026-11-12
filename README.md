@@ -1,28 +1,40 @@
 # window-scarves
 
-A little macOS menu-bar app that drapes a cosy knitted scarf over each of your windows for autumn. 🧣🍂
+A little macOS menu-bar app that gives each of your windows a cosy scarf for autumn. 🧣🍂
 
-Each window wears one soft, flowy scarf: a loose end pokes out above one corner, the scarf sags across the top of the window, goes up and over the other corner, and hangs down the side with a fringe. The window's red, yellow and green buttons become little sewing buttons.
+Each window wears one soft scarf that hugs it like a neck: a short end hangs down one side, the scarf runs along the top edge, wraps over the corner, and the long end hangs down the other side. Every app gets a different scarf from the collection.
 
-![Four windows, each with a knitted scarf draped across the top and hanging down one side](docs/hero.png)
+![Four windows, each wearing a different scarf: a lilac mohair check, an oatmeal rib knit, a red fine knit and a cocoa check](docs/hero.png)
 
-## The colourways
+## The collection
 
-![All seven colourways](docs/colourways.png)
+Nine scarves in three textures, each with its own fringe.
 
-- **Rosehip** (the default): a soft, warm red with cream stripes at the ends
-- **Candy Stripe**: wide rosehip and cream stripes
-- **Pumpkin Patch**: warm pumpkin with the odd cream stripe
-- **Marigold**: honey yellow with burnt-orange tips
-- **Buffalo Check**: soft red and charcoal lumberjack checks
-- **Evergreen**: mossy pine green with cream stripes
-- **Raspberry**: dusty berry pink with thin blush stripes
+![All nine scarves](docs/colourways.png)
 
-**By App** gives each app its own scarf from the collection, and it stays the same every time.
+**Brushed mohair** (fuzzy, no visible stitches, long fine fringe)
 
-Every stitch is drawn in code. The scarf follows a curved path, its width ripples a little like real fabric, and it has a fuzzy mohair halo and a wispy fringe at both ends.
+- **Lilac Check**: lilac, butter and pink
+- **Cocoa Check**: cocoa, sky blue and cream
+- **Moss Check**: moss, butter and navy
+- **Blush**: solid powder pink
 
-![Close-up of the rosehip scarf's stitches, stripes and fringe](docs/close-up.png)
+**Chunky rib knit** (fat stitches, short tassels)
+
+- **Oat Milk**: heathered oatmeal
+- **Camel**: warm camel
+
+**Fine knit** (little V stitches, wispy fringe)
+
+- **Rosehip**: soft red with cream stripes at the ends
+- **Heather Grey**: grey melange with charcoal stripes at the ends
+- **Varsity Stripe**: a skinny scarf in navy and cream with a rust thread
+
+**Mixed** (the default) gives each app a different scarf and remembers it. **Shuffle** deals them out again.
+
+Everything is drawn in code. The scarf follows a curved path, its width ripples a little like real fabric, the checks blend where colours cross, and each texture has its own fuzzy halo.
+
+![Close-up of the lilac mohair check](docs/close-up.png)
 
 ## Get it
 
@@ -48,28 +60,29 @@ Press **⌘D** anywhere to turn the scarves off and on.
 
 Click 🧣 in the menu bar for the rest:
 
-- **Colourway**: one scarf for every window, or By App
-- **Hangs Down**: on the right or on the left
+- **Scarf**: Mixed, Shuffle, or one scarf for every window
+- **Long End**: on the right or on the left
 - **Thickness**: Slim, Cosy or Chunky
 - **Windows**: every window, or only the front one
 - **Apps**: untick an app to leave its windows bare
-- **Buttons on Window Controls**: show or hide the sewing buttons
-- **Line Up Buttons Exactly…**: see below
+- **Buttons on Window Controls**: see below
 
-If there isn't room on screen beside a window for the hanging end, the scarf hangs down the other side instead.
+The scarf stays on the window's top edge, so it never covers the red, yellow and green buttons. If there's no room on screen beside a window, the long end moves to the other side, the short end is left off, and as a last resort the long end tucks just inside the window.
 
 ### The buttons
 
-The sewing buttons are only pictures. Clicks pass straight through to the real close, minimise and zoom buttons underneath.
+Window Scarves can turn each window's red, yellow and green buttons into little sewing buttons. They're only pictures: clicks pass straight through to the real buttons underneath.
 
-macOS only tells an app exactly where another window's buttons are if it has Accessibility permission. Without it, Window Scarves puts the buttons where they usually are, which is right for most windows but can be a few points off in apps with unusual title bars. Choose **Line Up Buttons Exactly…** to grant permission, and each button then sits exactly on the real one. The permission is optional and is only used for this.
+This needs Accessibility permission. Where those buttons sit differs from app to app (16 points in on plain windows, 26 on windows with toolbars, and anywhere at all in apps that draw their own title bars), so the only way to place a sewing button exactly on top is to ask the window, and macOS only allows that with permission. The app asks once when it first opens, and there's a menu item to ask again. Without permission the scarves work as normal and no sewing buttons are drawn. The permission is only used for this.
+
+The app is ad-hoc signed, so macOS treats each new build as a different app. After rebuilding, switch Window Scarves off and on again under **System Settings → Privacy & Security → Accessibility**.
 
 ## How it works
 
 Window Scarves uses only public macOS APIs.
 
-- `CGWindowListCopyWindowInfo` reports where every window is and how they're stacked. This needs no permission.
-- Each scarf is its own transparent, click-through window, ordered directly above the window it's draped over. Windows in front still cover it, just like real fabric.
+- `CGWindowListCopyWindowInfo` reports where every window is and how they're stacked. This needs no permission, so the scarves work without any.
+- Each scarf is its own transparent, click-through window, ordered directly above the window it's worn by. Windows in front still cover it, just like real fabric.
 - The app checks every 0.2 seconds, and more often while you drag a window, so scarves follow along.
 - Scarves are knitted into images on a background thread and cached, so the app idles at under 1% CPU.
 
@@ -82,7 +95,8 @@ Render the preview images without touching your real windows:
 ## Ideas for later
 
 - Falling leaves drifting past the active window
-- Choosing a colourway per app
+- Choosing a scarf for each app by hand
+- More textures: cable knit, bouclé, a blanket scarf
 - A choice of keyboard shortcut in the menu
 - A winter collection
 

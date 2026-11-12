@@ -23,138 +23,153 @@ enum Thickness: String, CaseIterable {
     }
 }
 
-/// How a scarf drapes over a window of width `w`. Coordinates are window-local,
+/// How the scarf is adjusted to fit the space around a window.
+struct ScarfFit: Equatable {
+    /// How far the long end is tucked inside the window, in points. Normally zero; it grows
+    /// when the window is against the edge of the screen with no room beside it.
+    var tuck: CGFloat = 0
+    /// Whether there's room for the short end on the other side. Without room it's left off,
+    /// rather than tucked inside where it would cover the window's buttons.
+    var shortEnd = true
+    static let roomy = ScarfFit()
+}
+
+/// How a scarf is worn by a window of width `w`. Coordinates are window-local,
 /// top-left origin, y down.
 ///
-/// One continuous strand: a loose end pokes out above the far top corner, the scarf sags
-/// across the top of the window, goes up and over the near top corner, and hangs down that
-/// side. (`side` is the side it hangs down.)
+/// One strand, hugging the window like a scarf round a neck: a short end hangs down one side,
+/// the scarf comes up over that top corner, runs along the top edge with a slight sag, wraps
+/// over the other corner and hangs down that side as the long end. (`side` is the long end.)
 struct ScarfGeometry {
-    let w: CGFloat, T: CGFloat, side: KnotSide, tailLength: CGFloat
+    let w: CGFloat, T: CGFloat, side: KnotSide, tailLength: CGFloat, fit: ScarfFit
 
     let path: [CGPoint]
     let tube: Tube
-    /// Below this y only the hanging end exists, so the scarf can be cut into two images there.
-    let split: CGFloat
-    /// The lowest the scarf dips before it reaches the hanging end.
-    private let dip: CGFloat
+    /// Disjoint image rects that together hold the whole scarf: the top run first,
+    /// then one for each hanging end.
+    let rects: [CGRect]
 
     var fringeLength: CGFloat { (T * 0.95).rounded() }
-    /// Room around the centreline for half the width, fuzz, fringe and shadow.
-    var margin: CGFloat { T * 0.62 + fringeLength + Knit.pad + 6 }
 
-    init(w: CGFloat, T: CGFloat, side: KnotSide, tailLength L: CGFloat) {
-        self.w = w; self.T = T; self.side = side; self.tailLength = L
+    /// Identifies this geometry in the image cache.
+    var key: String { "\(w)|\(T)|\(side)|\(tailLength)|\(fit.tuck)|\(fit.shortEnd)" }
+
+    init(w: CGFloat, T: CGFloat, side: KnotSide, tailLength L: CGFloat, fit: ScarfFit = .roomy) {
+        self.w = w; self.T = T; self.side = side; self.tailLength = L; self.fit = fit
+        // Built with the long end on the right, then mirrored if it's on the left.
         let mirror = side == .left
         func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: mirror ? w - x : x, y: y) }
 
-        let steps = max(32, Int(w / 10))
-        // The loose end, then the sag across the top.
-        let start = P(-2.6 * T, -2.0 * T)
-        let c2 = P(0.65 * w, 2.2 * T)
-        let corner = P(w + 0.9 * T, -1.05 * T)
-        let sweep = cubic(start, P(0.15 * w, 2.6 * T), c2, corner, steps: steps)
-        // Up and over the corner...
-        var dx = corner.x - c2.x, dy = corner.y - c2.y
-        let d = max(1, hypot(dx, dy)); dx /= d; dy /= d
-        let top = P(w + 2.1 * T, -0.1 * T)
-        let over = cubic(corner, CGPoint(x: corner.x + dx * 0.9 * T, y: corner.y + dy * 0.9 * T),
-                         P(w + 2.35 * T, -1.0 * T), top, steps: 24)
-        // ...and hanging down the side, drifting back towards the window.
-        let hang = cubic(top, P(w + 2.0 * T, 0.4 * L), P(w + 1.1 * T, 0.75 * L), P(w + 0.8 * T, L), steps: 48)
+        // The scarf's centreline sits just outside the window, overlapping its edge a little,
+        // so it never reaches the window's own buttons.
+        let R = 0.8 * T
+        let xL = -0.3 * T
+        let xR = max(xL + 2 * R + 1, w + 0.3 * T - fit.tuck)
+        let yT = -0.3 * T
+        let k = 0.5523 * R
+        let short = 2.4 * T
 
-        path = sweep + over.dropFirst() + hang.dropFirst()
+        let shortEnd = cubic(P(xL - 0.12 * T, yT + R + short), P(xL + 0.1 * T, yT + R + 0.66 * short),
+                             P(xL - 0.05 * T, yT + R + 0.33 * short), P(xL, yT + R), steps: 20)
+        let nearCorner = cubic(P(xL, yT + R), P(xL, yT + R - k), P(xL + R - k, yT), P(xL + R, yT), steps: 18)
+        let span = (xR - R) - (xL + R)
+        let sag = min(0.35 * T, span * 0.035)
+        let top = cubic(P(xL + R, yT), P(xL + R + span * 0.3, yT + sag * 1.33),
+                        P(xR - R - span * 0.3, yT + sag * 1.33), P(xR - R, yT), steps: max(24, Int(w / 10)))
+        let farCorner = cubic(P(xR - R, yT), P(xR - R + k, yT), P(xR, yT + R - k), P(xR, yT + R), steps: 18)
+        let longEnd = cubic(P(xR, yT + R), P(xR + 0.12 * T, yT + R + 0.35 * L),
+                            P(xR - 0.14 * T, yT + R + 0.7 * L), P(xR - 0.04 * T, yT + R + L), steps: 48)
+
+        let start = fit.shortEnd ? shortEnd + nearCorner.dropFirst() : []
+        path = start + (start.isEmpty ? top[...] : top.dropFirst()) + farCorner.dropFirst() + longEnd.dropFirst()
         tube = Tube(path)
-        dip = (sweep + over).map(\.y).max() ?? 0
-        split = (dip + T * 0.62 + 18).rounded()
+
+        // Cut into three images: everything above `split`, and each hanging end below it.
+        let side = T * 0.62 + 18                 // half the width, plus fuzz and shadow
+        let below = T * 1.5 + 18                 // the longest fringe, plus shadow
+        let box = boundingBox(path)
+        // Without a short end, the scarf starts on the top edge and its fringe points sideways.
+        let across = fit.shortEnd ? side : below
+        let full = CGRect(x: floor(box.minX - across), y: floor(box.minY - side),
+                          width: ceil(box.width + 2 * across), height: ceil(box.height + side + below))
+        let split = (yT + max(R, sag + 0.6 * T + 20)).rounded()
+        var out = [CGRect(x: full.minX, y: full.minY, width: full.width, height: split - full.minY)]
+        let hanging = path.filter { $0.y >= split - 1 }
+        for half in [hanging.filter { $0.x < w / 2 }, hanging.filter { $0.x >= w / 2 }] where !half.isEmpty {
+            let b = boundingBox(half)
+            out.append(CGRect(x: floor(b.minX - side), y: split, width: ceil(b.width + 2 * side),
+                              height: ceil(b.maxY + below - split)))
+        }
+        rects = out
     }
 
     /// The scarf's width along its length: it ripples a little, like soft fabric.
     func width(at s: CGFloat) -> CGFloat {
-        T * (1 + 0.05 * sin(2 * .pi * s / (3.1 * T)) + 0.03 * sin(2 * .pi * s / (1.7 * T) + 1))
-    }
-
-    private var fullRect: CGRect { boundingBox(path).insetBy(dx: -margin, dy: -margin).integral }
-
-    /// Everything above `split`: the loose end, the sag and the corner.
-    var topRect: CGRect {
-        let r = fullRect
-        return CGRect(x: r.minX, y: r.minY, width: r.width, height: split - r.minY)
-    }
-
-    /// The hanging end below `split`.
-    var hangRect: CGRect {
-        let r = fullRect
-        // Only the hanging end goes lower than the dip, so this picks out just that end.
-        let below = path.filter { $0.y > dip + 1 }
-        let b = boundingBox(below.isEmpty ? [CGPoint(x: r.maxX, y: split)] : below)
-        return CGRect(x: floor(b.minX - margin), y: split,
-                      width: ceil(b.width + 2 * margin), height: max(1, r.maxY - split))
+        T * (1 + 0.045 * sin(2 * .pi * s / (3.1 * T)) + 0.025 * sin(2 * .pi * s / (1.7 * T) + 1))
     }
 }
-
-enum PieceRole { case top, hang }
 
 /// Where one scarf image sits relative to its window.
 ///
 /// Coordinates are window-local, top-left origin, y down.
-/// `angle` is in radians; positive means the bottom of the piece swings to the right.
 struct Placement {
-    var role: PieceRole
+    /// Which of the geometry's image rects this is.
+    var index: Int
     var size: CGSize
-    /// The pivot inside the piece image, in unit coordinates (top-left origin).
-    var anchorUnit: CGPoint
-    /// Where that pivot sits, relative to the window's top-left corner.
-    var anchor: CGPoint
-    var angle: CGFloat
-    /// Sway amplitude in radians (0 = still).
-    var sway: CGFloat
-    var period: Double
+    /// Where the image's top-left corner sits, relative to the window's top-left corner.
+    var origin: CGPoint
     /// The geometry this piece was cut from.
-    var w: CGFloat, T: CGFloat, side: KnotSide, tailLength: CGFloat
+    var w: CGFloat, T: CGFloat, side: KnotSide, tailLength: CGFloat, fit: ScarfFit
 }
 
 enum ScarfLayout {
     static func tailLength(height h: CGFloat, T: CGFloat) -> CGFloat {
-        let raw = min(max(h * 0.62, 4 * T), 15 * T)
+        let raw = min(max(h * 0.5, 4 * T), 12 * T)
         return (raw / 4).rounded() * 4
     }
 
-    /// The scarf, cut into two images that sit side by side without overlapping.
-    static func placements(size: CGSize, T: CGFloat, side: KnotSide, tailLength: CGFloat) -> [Placement] {
-        let g = ScarfGeometry(w: size.width, T: T, side: side, tailLength: tailLength)
-        return [(PieceRole.top, g.topRect), (.hang, g.hangRect)].map { role, r in
-            Placement(role: role, size: r.size, anchorUnit: .zero, anchor: r.origin, angle: 0, sway: 0,
-                      period: 0, w: size.width, T: T, side: side, tailLength: tailLength)
+    /// How much room the scarf wants outside each edge of the window.
+    static func roomWanted(T: CGFloat) -> CGFloat { 0.85 * T }
+
+    /// Work out which side the long end hangs on and how the scarf fits, given the free space
+    /// on screen to the left and right of the window.
+    static func fit(preferred: KnotSide, roomLeft: CGFloat, roomRight: CGFloat, T: CGFloat) -> (KnotSide, ScarfFit) {
+        let want = roomWanted(T: T)
+        let room = { (s: KnotSide) in s == .right ? roomRight : roomLeft }
+        let other: KnotSide = preferred == .right ? .left : .right
+        // The long end goes where there's room; only tuck it inside if neither side has any.
+        let side = room(preferred) < want && room(other) >= want ? other : preferred
+        let far: KnotSide = side == .right ? .left : .right
+        var fit = ScarfFit()
+        if room(side) < want {
+            // Snapped to a few steps so the scarf isn't re-knitted for every point of movement.
+            let step = 0.2 * T
+            fit.tuck = min(0.9 * T, ((want - max(room(side), 0)) / step).rounded(.up) * step)
+        }
+        fit.shortEnd = room(far) >= want
+        return (side, fit)
+    }
+
+    /// The scarf, cut into images that sit side by side without overlapping.
+    static func placements(size: CGSize, T: CGFloat, side: KnotSide, tailLength: CGFloat,
+                           fit: ScarfFit = .roomy) -> [Placement] {
+        let g = ScarfGeometry(w: size.width, T: T, side: side, tailLength: tailLength, fit: fit)
+        return g.rects.enumerated().map { i, r in
+            Placement(index: i, size: r.size, origin: r.origin, w: size.width, T: T, side: side,
+                      tailLength: tailLength, fit: fit)
         }
     }
 
     /// The smallest rect (window-local, top-left origin) holding the window and every piece.
     static func extents(_ ps: [Placement], window: CGSize) -> CGRect {
         var r = CGRect(origin: .zero, size: window)
-        for p in ps {
-            let x0 = -p.anchorUnit.x * p.size.width, y0 = -p.anchorUnit.y * p.size.height
-            let corners = [
-                CGPoint(x: x0, y: y0), CGPoint(x: x0 + p.size.width, y: y0),
-                CGPoint(x: x0, y: y0 + p.size.height), CGPoint(x: x0 + p.size.width, y: y0 + p.size.height),
-            ]
-            for a in [p.angle - p.sway, p.angle, p.angle + p.sway] {
-                let c = cos(a), s = sin(a)
-                for q in corners {
-                    let pt = CGPoint(x: p.anchor.x + q.x * c + q.y * s, y: p.anchor.y - q.x * s + q.y * c)
-                    r = r.union(CGRect(origin: pt, size: .zero))
-                }
-            }
-        }
+        for p in ps { r = r.union(CGRect(origin: p.origin, size: p.size)) }
         return r.insetBy(dx: -2, dy: -2).integral
     }
 
-    /// How much room the hanging end needs beside the window.
-    static func roomNeeded(T: CGFloat) -> CGFloat { 3 * T }
-
     static func image(for p: Placement, colourway cw: Colourway, scale: CGFloat) -> CGImage? {
-        let g = ScarfGeometry(w: p.w, T: p.T, side: p.side, tailLength: p.tailLength)
-        return ScarfArt.piece(cw, g, rect: p.role == .top ? g.topRect : g.hangRect,
-                              key: "\(p.role)", scale: scale)
+        let g = ScarfGeometry(w: p.w, T: p.T, side: p.side, tailLength: p.tailLength, fit: p.fit)
+        guard p.index < g.rects.count else { return nil }
+        return ScarfArt.piece(cw, g, rect: g.rects[p.index], key: "\(p.index)", scale: scale)
     }
 }

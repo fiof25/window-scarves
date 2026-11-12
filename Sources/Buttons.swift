@@ -7,10 +7,6 @@ enum SewnButtons {
     /// Close, minimise, zoom.
     static let colours: [Yarn] = [Yarn(0xF2605A), Yarn(0xF5BD45), Yarn(0x52BF6B)]
 
-    /// Best guess at where the buttons are when we can't ask the window (window-local centres).
-    static let estimatedCentres = [CGPoint(x: 20, y: 20), CGPoint(x: 40, y: 20), CGPoint(x: 60, y: 20)]
-    static let estimatedDiameter: CGFloat = 13
-
     private static var cache: [String: CGImage] = [:]
 
     static func padding(_ d: CGFloat) -> CGFloat { 2 }
@@ -45,7 +41,8 @@ enum SewnButtons {
 }
 
 /// Finds where a window's real red, yellow and green buttons are, using Accessibility.
-/// Without permission it falls back to an estimate.
+/// Button positions differ between apps and title-bar styles, so there's no reliable way to
+/// guess them: without permission the buttons simply aren't drawn.
 enum WindowControls {
     struct Controls: Equatable {
         /// Window-local centres of close, minimise and zoom.
@@ -59,10 +56,6 @@ enum WindowControls {
     static func askForPermission() {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
-    }
-
-    static var estimate: Controls {
-        Controls(centres: SewnButtons.estimatedCentres, diameter: SewnButtons.estimatedDiameter, exact: false)
     }
 
     private static func frame(of e: AXUIElement) -> CGRect? {

@@ -28,6 +28,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if hotKey == nil {
             FileHandle.standardError.write(Data("Window Scarves: couldn't register ⌘D (another app may own it)\n".utf8))
         }
+
+        // The buttons need to know exactly where each window's real buttons are. Ask once.
+        if settings.sewnButtons && !WindowControls.trusted && !settings.askedForAccessibility {
+            settings.askedForAccessibility = true
+            WindowControls.askForPermission()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -46,21 +52,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
 
         let colours = NSMenu()
-        colours.addItem(item("By App — a different scarf for each app", #selector(pickColourway(_:)),
-                             on: settings.colourway == Colourways.byAppID, value: Colourways.byAppID))
+        let mixed = settings.colourway == Colourways.byAppID
+        colours.addItem(item("Mixed — a different scarf for each app", #selector(pickColourway(_:)),
+                             on: mixed, value: Colourways.byAppID))
+        if mixed { colours.addItem(item("Shuffle", #selector(shuffle), on: false)) }
         colours.addItem(.separator())
         for cw in Colourways.all {
             let it = item(cw.name, #selector(pickColourway(_:)), on: settings.colourway == cw.id, value: cw.id)
             it.toolTip = cw.blurb
             colours.addItem(it)
         }
-        menu.addItem(submenu("Colourway", colours))
+        menu.addItem(submenu("Scarf", colours))
 
         let knot = NSMenu()
         for side in KnotSide.allCases {
             knot.addItem(item(side.title, #selector(pickKnot(_:)), on: settings.knot == side, value: side.rawValue))
         }
-        menu.addItem(submenu("Hangs Down", knot))
+        menu.addItem(submenu("Long End", knot))
 
         let thick = NSMenu()
         for t in Thickness.allCases {
@@ -83,8 +91,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(item("Buttons on Window Controls", #selector(toggleButtons), on: settings.sewnButtons))
         if settings.sewnButtons && !WindowControls.trusted {
-            let fit = item("Line Up Buttons Exactly…", #selector(lineUpButtons), on: false)
-            fit.toolTip = "Asks for Accessibility access so each button sits exactly on the real one"
+            let fit = item("Buttons Need Accessibility Access — Turn On…", #selector(lineUpButtons), on: false)
+            fit.toolTip = "Lets Window Scarves see exactly where each window's buttons are"
             menu.addItem(fit)
         }
         menu.addItem(.separator())
@@ -108,6 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleEnabled() { settings.enabled.toggle() }
     @objc private func toggleButtons() { settings.sewnButtons.toggle() }
     @objc private func lineUpButtons() { WindowControls.askForPermission() }
+    @objc private func shuffle() { settings.shuffleAssignments() }
     @objc private func quit() { NSApp.terminate(nil) }
 
     @objc private func pickColourway(_ sender: NSMenuItem) {
@@ -141,7 +150,11 @@ if let i = args.firstIndex(of: "--render"), i + 1 < args.count {
     try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
     let ok = Catalogue.hero(to: dir + "/hero.png")
         && Catalogue.swatches(to: dir + "/colourways.png")
-        && Catalogue.closeUp(to: dir + "/close-up.png", colourway: Colourways.rosehip)
+        && Catalogue.closeUp(to: dir + "/close-up.png", colourway: Colourways.lilacCheck)
+        && Catalogue.closeUp(to: dir + "/close-up-rib.png", colourway: Colourways.oatMilk)
+        && Catalogue.closeUp(to: dir + "/close-up-knit.png", colourway: Colourways.heatherGrey)
+        && Catalogue.closeUp(to: dir + "/close-up-tucked.png", colourway: Colourways.cocoaCheck,
+                             fit: ScarfFit(tuck: 0.9 * 43, shortEnd: false))
     print(ok ? "Rendered previews into \(dir)" : "Rendering failed")
     exit(ok ? 0 : 1)
 }
