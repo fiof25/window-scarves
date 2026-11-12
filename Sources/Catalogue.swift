@@ -133,10 +133,10 @@ enum Catalogue {
         return write(img, to: path)
     }
 
-    /// Every colourway on its own little window, with its name underneath.
+    /// Every scarf on its own little window, with just its name underneath.
     static func swatches(to path: String, scale: CGFloat = 2) -> Bool {
-        let cols = 3
-        let cell = CGSize(width: 390, height: 360)
+        let cols = 4
+        let cell = CGSize(width: 390, height: 340)
         let all = Colourways.all
         let rows = (all.count + cols - 1) / cols
         let size = CGSize(width: CGFloat(cols) * cell.width + 40, height: CGFloat(rows) * cell.height + 40)
@@ -150,8 +150,6 @@ enum Catalogue {
                 drawScarf(ctx, on: r, colourway: cw, side: .right, T: 28, scale: scale)
                 drawText(ctx, cw.name, at: CGPoint(x: ox + 50, y: oy + 306), size: 17, weight: .semibold,
                          colour: Yarn(0xF8EEDC))
-                drawText(ctx, cw.blurb, at: CGPoint(x: ox + 50, y: oy + 328), size: 12.5, weight: .regular,
-                         colour: Yarn(0xBFD0BF))
             }
         }) else { return false }
         return write(img, to: path)

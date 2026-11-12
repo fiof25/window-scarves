@@ -2,38 +2,13 @@
 
 A little macOS menu-bar app that gives each of your windows a cosy scarf for autumn. 🧣🍂
 
-Each window wears one soft scarf that hugs it like a neck: a short end hangs down one side, the scarf runs along the top edge, wraps over the corner, and the long end hangs down the other side. Every app gets a different scarf from the collection.
-
 ![Four windows, each wearing a different scarf: a lilac mohair check, a cream cable knit, a red fine knit and a cocoa check](docs/hero.png)
 
 ## The collection
 
-Seven scarves in four textures, each with its own fringe.
+![All seven scarves: Lilac Check, Cream Cable, Rosehip, Cocoa Check, Camel, Moss Check and Blush](docs/colourways.png)
 
-![All seven scarves](docs/colourways.png)
-
-**Brushed mohair** (fuzzy, no visible stitches, long fine fringe)
-
-- **Lilac Check**: lilac, butter and pink
-- **Cocoa Check**: cocoa, sky blue and cream
-- **Moss Check**: moss, butter and navy
-- **Blush**: solid powder pink
-
-**Cable knit** (three slim twisted cables, short tassels)
-
-- **Cream Cable**: bright, soft cream
-
-**Chunky rib knit** (fat stitches, short tassels)
-
-- **Camel**: warm camel
-
-**Fine knit** (little V stitches, wispy fringe)
-
-- **Rosehip**: solid soft red
-
-**Mixed** (the default) gives each app a different scarf and remembers it. **Shuffle** deals them out again.
-
-Everything is drawn in code. The scarf follows a curved path, its width ripples a little like real fabric, the checks blend where colours cross, the cables really do cross over and under, and each texture has its own fuzzy halo.
+Every app gets a different scarf. Choose **Shuffle** in the menu to deal them out again, or pick one scarf for every window.
 
 ![Close-up of the lilac mohair check](docs/close-up.png)
 
