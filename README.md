@@ -54,6 +54,8 @@ Not every window gets one. A window that fills the whole screen goes bare, and s
 
 The scarf stays on the window's top edge, so it never covers the red, yellow and green buttons. If there's no room on screen beside a window, the long end moves to the other side, the short end is left off, and as a last resort the long end tucks just inside the window's right edge.
 
+When you click the desktop and macOS sweeps your windows to the edges of the screen, the scarves slip off while the windows are in flight and settle back on once they land, both on the way out and on the way back.
+
 ## How it works
 
 Window Scarves uses only public macOS APIs, and it doesn't need any permissions.

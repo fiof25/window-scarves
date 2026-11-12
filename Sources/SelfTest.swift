@@ -94,6 +94,18 @@ enum SelfTest {
                "a maximised window above the Dock was treated as full screen")
         expect(!Tracker.fillsScreen(CGRect(x: 100, y: 100, width: 800, height: 600), screens),
                "an ordinary window was treated as full screen")
+
+        // The cover macOS puts up while the desktop is revealed.
+        let screen = CGRect(x: 0, y: 0, width: 1512, height: 982)
+        expect(Tracker.isRevealCover(owner: "WindowManager", layer: 18, frame: screen, screens: screens),
+               "the desktop-revealed cover wasn't recognised")
+        expect(!Tracker.isRevealCover(owner: "WindowManager", layer: 18,
+                                      frame: CGRect(x: 0, y: 300, width: 160, height: 400), screens: screens),
+               "a small system window was taken for the desktop-revealed cover")
+        expect(!Tracker.isRevealCover(owner: "Dock", layer: 20, frame: screen, screens: screens),
+               "the Dock's window was taken for the desktop-revealed cover")
+        expect(!Tracker.isRevealCover(owner: "WindowManager", layer: 0, frame: screen, screens: screens),
+               "an ordinary-level window was taken for the desktop-revealed cover")
         func window(_ pid: pid_t, _ r: CGRect) -> Tracker.Target {
             Tracker.Target(id: 1, frame: r, owner: "test", pid: pid, index: 0)
         }

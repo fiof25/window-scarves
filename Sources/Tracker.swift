@@ -26,6 +26,14 @@ final class Tracker {
     /// Newly seen windows, with the frame they had and when they first had it.
     private var settling: [CGWindowID: (frame: CGRect, since: CFTimeInterval)] = [:]
 
+    /// When macOS last had its "desktop revealed" cover up (see `isRevealCover`).
+    private var revealSeen: CFTimeInterval = -10
+    private var revealActive = false
+    /// Windows being swept aside or brought back by macOS, and when each last moved.
+    private var sweptAt: [CGWindowID: CFTimeInterval] = [:]
+    /// How long a swept window must hold still before its scarf comes back.
+    private static let sweepRest = 0.15
+
     private static let fastInterval = 1.0 / 120
     private static let idleInterval = 1.0 / 20
     /// While idle, look at the windows on every Nth tick (10 times a second).
@@ -101,7 +109,8 @@ final class Tracker {
         } else {
             idleTicks += 1
             // With the button held, a drag could start at any moment, so look on every tick.
-            if mouseDown || idleTicks % Tracker.idleStride == 0 { refresh() }
+            // The same goes while the desktop is revealed: the windows can fly back any time.
+            if mouseDown || revealActive || idleTicks % Tracker.idleStride == 0 { refresh() }
         }
     }
 
@@ -119,6 +128,7 @@ final class Tracker {
         lastSeen.removeAll()
         lastOrder.removeAll()
         settling.removeAll()
+        sweptAt.removeAll()
     }
 
     struct Target {
@@ -175,6 +185,24 @@ final class Tracker {
         return false
     }
 
+    /// Debugging aid: start the app with SCARVES_LOG set to print what happens during sweeps.
+    private let logging = ProcessInfo.processInfo.environment["SCARVES_LOG"] != nil
+    private let started = CACurrentMediaTime()
+    private func log(_ message: @autoclosure () -> String) {
+        guard logging else { return }
+        FileHandle.standardError.write(Data(String(format: "%7.2f  %@\n", CACurrentMediaTime() - started, message()).utf8))
+    }
+
+    /// Whether a window is the invisible cover macOS puts over a whole screen while the desktop
+    /// is revealed (clicking the wallpaper, or Show Desktop). It goes up just as the windows
+    /// start sliding to the screen edges and comes down as they arrive back.
+    static func isRevealCover(owner: String, layer: Int, frame: CGRect, screens: [CGRect]) -> Bool {
+        owner == "WindowManager" && layer > 0 && screens.contains {
+            abs(frame.minX - $0.minX) < 2 && abs(frame.minY - $0.minY) < 2
+                && abs(frame.width - $0.width) < 2 && abs(frame.height - $0.height) < 2
+        }
+    }
+
     func refresh() {
         guard settings.enabled else {
             if !overlays.isEmpty { removeAll() }
@@ -189,13 +217,21 @@ final class Tracker {
         var sizeable: [Target] = []     // every real-sized app window, front to back
         var targets: [Target] = []
         var apps: Set<String> = []
+        var revealed = false
 
         for (i, w) in info.enumerated() {
             guard let num = w[kCGWindowNumber] as? Int, let id = CGWindowID(exactly: num) else { continue }
             index[id] = i
-            guard (w[kCGWindowLayer] as? Int) == 0,
+            guard let layer = w[kCGWindowLayer] as? Int,
                   let pid = w[kCGWindowOwnerPID] as? Int32, pid != myPID else { continue }
             let owner = w[kCGWindowOwnerName] as? String ?? ""
+            if layer != 0 {
+                if !revealed, owner == "WindowManager", let bounds = w[kCGWindowBounds] as? NSDictionary,
+                   let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) {
+                    revealed = Tracker.isRevealCover(owner: owner, layer: layer, frame: rect, screens: screens)
+                }
+                continue
+            }
             if ignoredOwners.contains(owner) { continue }
             if let alpha = w[kCGWindowAlpha] as? Double, alpha < 0.1 { continue }
             guard let bounds = w[kCGWindowBounds] as? NSDictionary,
@@ -239,6 +275,31 @@ final class Tracker {
         // If any window moved, resized, appeared, vanished or changed order, keep watching closely.
         let seen = Dictionary(targets.map { ($0.id, $0.frame) }, uniquingKeysWith: { first, _ in first })
         let order = targets.map(\.id)
+
+        // Revealing the desktop sweeps every window to the screen edges, and macOS sweeps each
+        // piece of a scarf too, as if it were a window of its own, each towards a different edge.
+        // Chasing the windows through that would be a tug of war. So while windows are in flight
+        // their scarves step out of sight, and come back once the windows have landed (at the
+        // edge, and again when they return).
+        if revealed { revealSeen = clock }
+        let wasActive = revealActive
+        revealActive = clock - revealSeen < 0.5
+        if revealActive != wasActive {
+            // The sweep is starting, or the windows are nearly home: watch closely.
+            stayFast(0.6)
+            log("desktop \(revealActive ? "revealed" : "covered again")")
+        }
+        if revealActive {
+            let moved = targets.filter { lastSeen[$0.id] != $0.frame }
+            // With the button held, one window moving is the user dragging it; several at once
+            // is still a sweep.
+            if !moved.isEmpty, !mouseDown || moved.count >= 2 {
+                for t in moved { sweptAt[t.id] = clock }
+            }
+        } else if !sweptAt.isEmpty {
+            sweptAt.removeAll()
+        }
+
         if seen != lastSeen || order != lastOrder {
             // The windows were re-stacked (a click, say): let every scarf be put back at once,
             // even one that had been told to stop trying so often.
@@ -260,6 +321,23 @@ final class Tracker {
         let thickness = settings.thickness.points
         let visible = visibleRectsCG()
         for t in targets {
+            if let at = sweptAt[t.id] {
+                if clock - at < Tracker.sweepRest {
+                    // Still in flight: stay out of sight and leave the pieces wherever macOS
+                    // takes them.
+                    if let overlay = overlays[t.id] {
+                        if overlay.isShown { log("in flight, scarf off: \(t.owner) \(t.frame.origin)") }
+                        overlay.hide()
+                        overlay.lastSeen = now
+                    }
+                    stayFast(0.3)
+                    continue
+                }
+                // Landed. Put the scarf back on, re-stacking it straight away if need be.
+                sweptAt[t.id] = nil
+                overlays[t.id]?.orderMisses = 0
+                log("landed, scarf back on: \(t.owner) \(t.frame.origin)")
+            }
             let overlay = overlays[t.id] ?? {
                 let o = ScarfOverlay(targetID: t.id)
                 overlays[t.id] = o
