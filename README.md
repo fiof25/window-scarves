@@ -26,7 +26,7 @@ Nine scarves in three textures, each with its own fringe.
 
 **Fine knit** (little V stitches, wispy fringe)
 
-- **Rosehip**: soft red with cream stripes at the ends
+- **Rosehip**: solid soft red
 - **Heather Grey**: grey melange with charcoal stripes at the ends
 - **Varsity Stripe**: a skinny scarf in navy and cream with a rust thread
 

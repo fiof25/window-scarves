@@ -154,9 +154,9 @@ enum Colourways {
 
     static let rosehip = Colourway(
         id: "rosehip", name: "Rosehip",
-        blurb: "fine knit in soft red with cream stripes at the ends",
+        blurb: "fine knit in solid soft red",
         texture: .knit, base: Yarn(0xC5483E), weight: 1, heather: 0.05, fringe: .wispy
-    ) { _, _, _, fromEnd in endStripes(fromEnd) ? cream : Yarn(0xC5483E) }
+    ) { _, _, _, _ in Yarn(0xC5483E) }
 
     static let cocoaCheck = Colourway(
         id: "cocoa-check", name: "Cocoa Check",
