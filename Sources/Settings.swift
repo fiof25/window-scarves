@@ -15,7 +15,7 @@ final class Settings {
 
     /// A colourway id, or `Colourways.byAppID` for a different scarf per app.
     var colourway: String {
-        get { d.string(forKey: "colourway") ?? Colourways.byAppID }
+        get { d.string(forKey: "colourway") ?? Colourways.defaultID }
         set { d.set(newValue, forKey: "colourway"); changed() }
     }
 
@@ -34,9 +34,10 @@ final class Settings {
         set { d.set(newValue, forKey: "frontOnly"); changed() }
     }
 
-    var breeze: Bool {
-        get { d.object(forKey: "breeze") as? Bool ?? true }
-        set { d.set(newValue, forKey: "breeze"); changed() }
+    /// Cover the red, yellow and green window buttons with sewing buttons.
+    var sewnButtons: Bool {
+        get { d.object(forKey: "sewnButtons") as? Bool ?? true }
+        set { d.set(newValue, forKey: "sewnButtons"); changed() }
     }
 
     /// Apps whose windows go without a scarf.

@@ -10,7 +10,7 @@ BIN="$APP/Contents/MacOS/WindowScarves"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" build/obj
 
-FLAGS=(-O -swift-version 5 -framework AppKit -framework QuartzCore)
+FLAGS=(-O -swift-version 5 -framework AppKit -framework QuartzCore -framework Carbon)
 archs=()
 for arch in arm64 x86_64; do
   if swiftc "${FLAGS[@]}" -target "$arch-apple-macos13.0" -o "build/obj/WindowScarves-$arch" Sources/*.swift; then

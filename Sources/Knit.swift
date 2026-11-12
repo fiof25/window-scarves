@@ -1,9 +1,107 @@
 import CoreGraphics
 import Foundation
 
-/// Low-level knit drawing. All drawing happens in a top-left-origin, y-down space.
+// MARK: - Curves
+
+struct PathSample {
+    var p: CGPoint
+    /// Unit tangent: the direction the scarf travels.
+    var t: CGVector
+    /// Arc length from the start.
+    var s: CGFloat
+    /// Unit normal, 90° clockwise on screen from the tangent.
+    var n: CGVector { CGVector(dx: -t.dy, dy: t.dx) }
+}
+
+func cubic(_ p0: CGPoint, _ c1: CGPoint, _ c2: CGPoint, _ p3: CGPoint, steps: Int = 64) -> [CGPoint] {
+    (0...steps).map { k in
+        let u = CGFloat(k) / CGFloat(steps), v = 1 - u
+        let a = v * v * v, b = 3 * v * v * u, c = 3 * v * u * u, d = u * u * u
+        return CGPoint(x: a * p0.x + b * c1.x + c * c2.x + d * p3.x,
+                       y: a * p0.y + b * c1.y + c * c2.y + d * p3.y)
+    }
+}
+
+func boundingBox(_ pts: [CGPoint]) -> CGRect {
+    guard let f = pts.first else { return .zero }
+    var r = CGRect(origin: f, size: .zero)
+    for p in pts { r = r.union(CGRect(origin: p, size: .zero)) }
+    return r
+}
+
+/// A centreline resampled every 1pt, so stitches can be laid along it.
+struct Tube {
+    let samples: [PathSample]
+    var length: CGFloat { samples.last?.s ?? 0 }
+
+    init(_ pts: [CGPoint]) {
+        var out: [PathSample] = []
+        var acc: CGFloat = 0, next: CGFloat = 0
+        for (a, b) in zip(pts, pts.dropFirst()) {
+            let dx = b.x - a.x, dy = b.y - a.y
+            let len = hypot(dx, dy)
+            if len < 1e-6 { continue }
+            let t = CGVector(dx: dx / len, dy: dy / len)
+            while next <= acc + len {
+                let f = (next - acc) / len
+                out.append(PathSample(p: CGPoint(x: a.x + dx * f, y: a.y + dy * f), t: t, s: next))
+                next += 1
+            }
+            acc += len
+        }
+        if let last = pts.last, let lt = out.last?.t {
+            out.append(PathSample(p: last, t: lt, s: acc))
+        }
+        // Smooth the tangents so stitches turn gracefully round bends.
+        var smooth = out
+        for i in out.indices {
+            var dx: CGFloat = 0, dy: CGFloat = 0
+            for k in max(0, i - 4)...min(out.count - 1, i + 4) { dx += out[k].t.dx; dy += out[k].t.dy }
+            let l = hypot(dx, dy)
+            if l > 0 { smooth[i].t = CGVector(dx: dx / l, dy: dy / l) }
+        }
+        samples = smooth
+    }
+
+    /// The point at arc length `s`, extended in a straight line past either end.
+    func at(_ s: CGFloat) -> PathSample {
+        guard var q = samples.first else { return PathSample(p: .zero, t: CGVector(dx: 0, dy: 1), s: 0) }
+        if s <= 0 {
+            q.p = CGPoint(x: q.p.x + q.t.dx * s, y: q.p.y + q.t.dy * s); q.s = s
+            return q
+        }
+        if s >= length {
+            q = samples[samples.count - 1]
+            let d = s - length
+            q.p = CGPoint(x: q.p.x + q.t.dx * d, y: q.p.y + q.t.dy * d); q.s = s
+            return q
+        }
+        return samples[min(Int(s), samples.count - 1)]
+    }
+
+    /// The outline of the scarf, whose width may vary along its length.
+    func outline(width: (CGFloat) -> CGFloat) -> (path: CGPath, edge: [CGPoint]) {
+        var left: [CGPoint] = [], right: [CGPoint] = []
+        var s: CGFloat = 0
+        while true {
+            let q = at(s), n = q.n, half = width(s) / 2
+            left.append(CGPoint(x: q.p.x + n.dx * half, y: q.p.y + n.dy * half))
+            right.append(CGPoint(x: q.p.x - n.dx * half, y: q.p.y - n.dy * half))
+            if s >= length { break }
+            s = min(length, s + 1.5)
+        }
+        let path = CGMutablePath()
+        path.addLines(between: left + right.reversed())
+        path.closeSubpath()
+        return (path, left + right)
+    }
+}
+
+// MARK: - Knitting
+
 enum Knit {
-    static let pad: CGFloat = 8
+    static let pad: CGFloat = 10
+    static let across = 7
     static let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
 
     /// Make a transparent bitmap of `size` points and draw into it with a y-down coordinate space.
@@ -23,228 +121,172 @@ enum Knit {
         return ctx.makeImage()
     }
 
-    /// Fill `rect` with stockinette stitches: columns of little V's pointing down.
-    static func stitches(
-        _ ctx: CGContext, rect: CGRect, sw: CGFloat, sh: CGFloat, seed: Int,
-        colour: (_ col: Int, _ row: Int) -> Yarn
-    ) {
-        let cols = Int(ceil(rect.width / sw))
-        let rows = Int(ceil(rect.height / sh))
-        let theta: CGFloat = 0.5
-        let ew = 0.54 * sw, eh = 1.34 * sh
+    /// Height of one row of stitches for a scarf `width` wide.
+    static func rowHeight(_ width: CGFloat) -> CGFloat { width / CGFloat(across) * 0.8 }
+
+    static func black(_ a: CGFloat) -> CGColor { CGColor(srgbRed: 0, green: 0, blue: 0, alpha: a) }
+
+    /// One knit stitch: a soft V whose point faces along `angle`.
+    static func stitch(_ ctx: CGContext, at c: CGPoint, angle: CGFloat, sw: CGFloat, sh: CGFloat, yarn: Yarn) {
+        let ew = 0.6 * sw, eh = 1.42 * sh
         let outer = CGRect(x: -ew / 2, y: -eh / 2, width: ew, height: eh)
-        let inner = CGRect(x: -ew * 0.34, y: -eh * 0.45, width: ew * 0.68, height: eh * 0.8)
-        let shine = CGRect(x: -ew * 0.17, y: -eh * 0.38, width: ew * 0.3, height: eh * 0.4)
-        let sides: [CGFloat] = [-1, 1]
-        for row in -1...rows {
-            for col in 0..<cols {
-                let base = colour(col, row)
-                let y = base.shade(0.92 + 0.16 * noise01(col, row, seed))
-                let dark = y.shade(0.66).cg, mid = y.cg, light = y.lighten(0.17).cg
-                let cx = rect.minX + (CGFloat(col) + 0.5) * sw
-                let cy = rect.minY + (CGFloat(row) + 0.5) * sh
-                for side in sides {
-                    ctx.saveGState()
-                    ctx.translateBy(x: cx + side * 0.23 * sw, y: cy)
-                    ctx.rotate(by: side * theta)
-                    ctx.setFillColor(dark); ctx.fillEllipse(in: outer)
-                    ctx.setFillColor(mid); ctx.fillEllipse(in: inner)
-                    ctx.setFillColor(light); ctx.fillEllipse(in: shine)
-                    ctx.restoreGState()
-                }
-            }
-        }
-    }
-
-    private static func grey(_ white: CGFloat, _ alpha: CGFloat) -> CGColor {
-        CGColor(srgbRed: white, green: white, blue: white, alpha: alpha)
-    }
-
-    /// Soft tube shading across the scarf so it looks puffy rather than flat.
-    static func shadeAcross(_ ctx: CGContext, rect: CGRect, horizontal: Bool) {
-        let colors = [
-            grey(0, 0.30), grey(0, 0.05), grey(1, 0.13), grey(1, 0), grey(0, 0.10), grey(0, 0.48),
-        ] as CFArray
-        let locs: [CGFloat] = [0, 0.16, 0.36, 0.56, 0.8, 1]
-        guard let g = CGGradient(colorsSpace: sRGB, colors: colors, locations: locs) else { return }
-        let start = horizontal ? CGPoint(x: rect.minX, y: rect.midY) : CGPoint(x: rect.midX, y: rect.minY)
-        let end = horizontal ? CGPoint(x: rect.maxX, y: rect.midY) : CGPoint(x: rect.midX, y: rect.maxY)
-        ctx.drawLinearGradient(g, start: start, end: end, options: [])
-    }
-
-    /// Draw a scarf piece: a soft drop shadow, the knit body clipped to `shape`, and a faint edge.
-    static func piece(
-        _ ctx: CGContext, shape: CGPath, gap: Yarn, scale: CGFloat, body: (CGContext) -> Void
-    ) {
+        let inner = CGRect(x: -ew * 0.37, y: -eh * 0.46, width: ew * 0.74, height: eh * 0.84)
+        let shine = CGRect(x: -ew * 0.18, y: -eh * 0.38, width: ew * 0.3, height: eh * 0.4)
+        let dark = yarn.shade(0.86).cg, mid = yarn.cg, light = yarn.lighten(0.13).cg
         ctx.saveGState()
-        ctx.setShadow(offset: CGSize(width: 0, height: -2.5 * scale), blur: 5 * scale, color: grey(0, 0.36))
-        ctx.addPath(shape)
-        ctx.setFillColor(gap.cg)
+        ctx.translateBy(x: c.x, y: c.y)
+        ctx.rotate(by: angle)
+        for side in [-1.0, 1.0] as [CGFloat] {
+            ctx.saveGState()
+            ctx.translateBy(x: side * 0.23 * sw, y: 0)
+            ctx.rotate(by: side * 0.5)
+            ctx.setFillColor(dark); ctx.fillEllipse(in: outer)
+            ctx.setFillColor(mid); ctx.fillEllipse(in: inner)
+            ctx.setFillColor(light); ctx.fillEllipse(in: shine)
+            ctx.restoreGState()
+        }
+        ctx.restoreGState()
+    }
+
+    /// Knit a whole scarf along `tube`. Only stitches near `visible` are drawn, so the same
+    /// scarf can be rendered into several images that line up exactly.
+    static func scarf(
+        _ ctx: CGContext, _ tube: Tube, width: (CGFloat) -> CGFloat, visible: CGRect, scale: CGFloat,
+        colourway cw: Colourway, colour: (_ row: Int, _ j: Int) -> Yarn
+    ) {
+        let n = across
+        let o = tube.outline(width: width)
+
+        // A soft shadow, and the colour between stitches.
+        ctx.saveGState()
+        ctx.setShadow(offset: CGSize(width: 0, height: -3 * scale), blur: 9 * scale, color: black(0.22))
+        ctx.addPath(o.path)
+        ctx.setFillColor(cw.gap.cg)
         ctx.fillPath()
         ctx.restoreGState()
 
         ctx.saveGState()
-        ctx.addPath(shape)
+        ctx.addPath(o.path)
         ctx.clip()
-        body(ctx)
+        let base = width(0)
+        let sh = rowHeight(base)
+        let near = visible.insetBy(dx: -base, dy: -base)
+        let rows = Int(ceil(tube.length / sh))
+        let wisps = CGMutablePath()
+        for r in -1...(rows + 1) {
+            let s = (CGFloat(r) + 0.5) * sh
+            let q = tube.at(s)
+            guard near.contains(q.p) else { continue }
+            let nv = q.n, W = width(s), sw = W / CGFloat(n)
+            let angle = atan2(-q.t.dx, q.t.dy)
+            for j in 0..<n {
+                let u = (CGFloat(j) + 0.5) / CGFloat(n) * 2 - 1
+                let a = u * W / 2
+                // Flat, soft fabric: barely darker at the edges, with slanting ripples.
+                let ripple = 0.055 * sin(2 * .pi * (s + 0.9 * a) / (2.3 * base))
+                    + 0.03 * sin(2 * .pi * (s - 0.5 * a) / (0.9 * base) + 2)
+                let light = 1.03 - 0.09 * u * u - 0.03 * u * nv.dy + ripple
+                let y = colour(r, j).shade(light * (0.975 + 0.05 * noise01(r, j, 17)))
+                let c = CGPoint(x: q.p.x + nv.dx * a, y: q.p.y + nv.dy * a)
+                stitch(ctx, at: c, angle: angle, sw: sw, sh: sh, yarn: y)
+                // Brushed fibres lying across the surface.
+                if noise01(r, j, 23) < 0.7 {
+                    let dir = noise01(r, j, 29) * 2 * .pi, len = sw * (0.7 + 1.3 * noise01(r, j, 31))
+                    wisps.move(to: c)
+                    wisps.addLine(to: CGPoint(x: c.x + cos(dir) * len, y: c.y + sin(dir) * len))
+                }
+            }
+        }
+        ctx.addPath(wisps)
+        ctx.setStrokeColor(cw.fuzz.cg(alpha: 0.2))
+        ctx.setLineWidth(0.5)
+        ctx.setLineCap(.round)
+        ctx.strokePath()
         ctx.restoreGState()
 
+        // A fuzzy halo round the edge, like mohair.
+        let halo = CGMutablePath()
+        for (k, p) in o.edge.enumerated() where near.contains(p) {
+            for h in 0..<2 {
+                let a = noise01(k, h, 1) * 2 * .pi
+                let l = 1.5 + 3.5 * noise01(k, h, 2) * noise01(k, h, 3)
+                halo.move(to: p)
+                halo.addLine(to: CGPoint(x: p.x + cos(a) * l, y: p.y + sin(a) * l))
+            }
+        }
         ctx.saveGState()
-        ctx.addPath(shape)
-        ctx.setStrokeColor(grey(0, 0.2))
-        ctx.setLineWidth(0.8)
+        ctx.addPath(halo)
+        ctx.setStrokeColor(cw.fuzz.cg(alpha: 0.38))
+        ctx.setLineWidth(0.5)
+        ctx.setLineCap(.round)
         ctx.strokePath()
+        ctx.restoreGState()
+    }
+
+    /// Wispy fringe at one end of the scarf, flowing on in the direction the end points.
+    static func fringe(_ ctx: CGContext, _ tube: Tube, atStart: Bool, width W: CGFloat, length F: CGFloat,
+                       yarn: Yarn, scale: CGFloat, seed: Int) {
+        let q = tube.at(atStart ? 0 : tube.length), nv = q.n
+        let f: CGFloat = atStart ? -1 : 1
+        let t = CGVector(dx: q.t.dx * f, dy: q.t.dy * f)
+        let strands = 9
+        let ws = W * 0.085
+        ctx.saveGState()
+        ctx.setShadow(offset: CGSize(width: 0, height: -2 * scale), blur: 5 * scale, color: black(0.18))
+        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+        ctx.setLineCap(.round)
+        for k in 0..<strands {
+            let u = (CGFloat(k) + 0.5) / CGFloat(strands) * 2 - 1
+            let a = u * W * 0.44
+            let base = CGPoint(x: q.p.x + nv.dx * a - t.dx * W * 0.12, y: q.p.y + nv.dy * a - t.dy * W * 0.12)
+            let wob = noise01(k, seed, 3) - 0.5
+            let len = F * (0.75 + 0.4 * noise01(k, seed, 5))
+            func pt(_ along: CGFloat, _ side: CGFloat) -> CGPoint {
+                CGPoint(x: base.x + t.dx * along + nv.dx * side, y: base.y + t.dy * along + nv.dy * side)
+            }
+            let path = CGMutablePath()
+            path.move(to: base)
+            path.addCurve(to: pt(len, wob * W * 0.45 + u * W * 0.08), control1: pt(len * 0.35, wob * W * 0.3),
+                          control2: pt(len * 0.7, -wob * W * 0.2))
+            for (width, colour) in [(ws, yarn.shade(0.84)), (ws * 0.62, yarn), (ws * 0.2, yarn.lighten(0.2))] {
+                ctx.addPath(path)
+                ctx.setStrokeColor(colour.cg)
+                ctx.setLineWidth(width)
+                ctx.strokePath()
+            }
+        }
+        ctx.endTransparencyLayer()
         ctx.restoreGState()
     }
 }
 
-/// Renders (and caches) the three kinds of scarf piece: the band, a tail and the knot.
+// MARK: - Scarf images
+
+/// Renders (and caches) images of the scarf described by a `ScarfGeometry`.
 enum ScarfArt {
     private static var cache: [String: CGImage] = [:]
 
     static func clearCache() { cache.removeAll() }
 
-    private static func cached(_ key: String, _ make: () -> CGImage?) -> CGImage? {
-        if let c = cache[key] { return c }
-        if cache.count > 240 { cache.removeAll() }
-        let img = make()
-        cache[key] = img
+    /// The part of the scarf inside `rect` (window-local coordinates).
+    static func piece(_ cw: Colourway, _ g: ScarfGeometry, rect: CGRect, key: String, scale: CGFloat) -> CGImage? {
+        let cacheKey = "\(key)|\(cw.id)|\(g.w)|\(g.T)|\(g.side)|\(g.tailLength)|\(scale)"
+        if let c = cache[cacheKey] { return c }
+        if cache.count > 40 { cache.removeAll() }
+        let img = Knit.image(size: rect.size, scale: scale) { ctx in
+            ctx.translateBy(x: -rect.minX, y: -rect.minY)
+            let tube = g.tube
+            let rows = Int(ceil(tube.length / Knit.rowHeight(g.width(at: 0))))
+            for atStart in [true, false] {
+                Knit.fringe(ctx, tube, atStart: atStart, width: g.width(at: atStart ? 0 : tube.length),
+                            length: g.fringeLength, yarn: cw.fringeYarn, scale: scale, seed: atStart ? 1 : 2)
+            }
+            Knit.scarf(ctx, tube, width: g.width(at:), visible: rect, scale: scale, colourway: cw) { r, j in
+                // Rows are counted from the nearer end, so both ends get the same stripes.
+                cw.yarn(r, j, Knit.across, min(r, rows - 1 - r))
+            }
+        }
+        cache[cacheKey] = img
         return img
-    }
-
-    static func fringeLength(_ T: CGFloat) -> CGFloat { (T * 1.05).rounded() }
-
-    static func bandSize(length: CGFloat, T: CGFloat) -> CGSize {
-        CGSize(width: length.rounded() + 2 * Knit.pad, height: T + 2 * Knit.pad)
-    }
-
-    static func tailSize(length: CGFloat, T: CGFloat) -> CGSize {
-        CGSize(width: T + 2 * Knit.pad, height: length + fringeLength(T) + 2 * Knit.pad)
-    }
-
-    static func knotSize(T: CGFloat) -> CGSize {
-        CGSize(width: (1.45 * T).rounded() + 2 * Knit.pad, height: (1.25 * T).rounded() + 2 * Knit.pad)
-    }
-
-    /// The long band that drapes across the top of the window.
-    static func band(_ cw: Colourway, length: CGFloat, T: CGFloat, scale: CGFloat) -> CGImage? {
-        let L = length.rounded()
-        return cached("band|\(cw.id)|\(L)|\(T)|\(scale)") {
-            Knit.image(size: bandSize(length: L, T: T), scale: scale) { ctx in
-                let rect = CGRect(x: Knit.pad, y: Knit.pad, width: L, height: T)
-                let shape = CGPath(roundedRect: rect, cornerWidth: T * 0.49, cornerHeight: T * 0.49, transform: nil)
-                let n = 10
-                let sh = T / CGFloat(n), sw = sh / 0.82
-                Knit.piece(ctx, shape: shape, gap: cw.gap, scale: scale) { ctx in
-                    Knit.stitches(ctx, rect: rect, sw: sw, sh: sh, seed: 1) { c, r in
-                        cw.yarn(c, min(max(r, 0), n - 1), n)
-                    }
-                    Knit.shadeAcross(ctx, rect: rect, horizontal: false)
-                }
-            }
-        }
-    }
-
-    /// A hanging tail with a fringe at the bottom.
-    static func tail(_ cw: Colourway, length: CGFloat, T: CGFloat, seed: Int, scale: CGFloat) -> CGImage? {
-        cached("tail|\(cw.id)|\(length)|\(T)|\(seed)|\(scale)") {
-            Knit.image(size: tailSize(length: length, T: T), scale: scale) { ctx in
-                let n = 8
-                let sw = T / CGFloat(n), sh = sw * 0.82
-                let rows = Int(ceil(length / sh))
-                let rect = CGRect(x: Knit.pad, y: Knit.pad, width: T, height: length)
-                let F = fringeLength(T)
-
-                // Fringe first, so the knitted end sits on top of the knots.
-                ctx.saveGState()
-                ctx.setShadow(offset: CGSize(width: 0, height: -2 * scale), blur: 4 * scale,
-                              color: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.3))
-                ctx.beginTransparencyLayer(auxiliaryInfo: nil)
-                ctx.setLineCap(.round)
-                for col in 0..<n {
-                    let yarn = cw.fringe.map { cw.yarns[$0] } ?? cw.yarn(rows + seed, col, n)
-                    for s in 0..<2 {
-                        let x = rect.minX + (CGFloat(col) + 0.3 + 0.4 * CGFloat(s)) * sw
-                        let k = noise01(col, s, seed + 5) - 0.5
-                        let len = F * (0.86 + 0.28 * noise01(col, s, seed + 9) - 0.14)
-                        let top = CGPoint(x: x, y: rect.maxY - sh)
-                        let path = CGMutablePath()
-                        path.move(to: top)
-                        path.addCurve(
-                            to: CGPoint(x: x + k * sw * 1.6, y: rect.maxY + len),
-                            control1: CGPoint(x: x + k * sw * 0.8, y: rect.maxY + len * 0.35),
-                            control2: CGPoint(x: x - k * sw * 0.6, y: rect.maxY + len * 0.7)
-                        )
-                        ctx.addPath(path); ctx.setStrokeColor(yarn.shade(0.6).cg)
-                        ctx.setLineWidth(sw * 0.5); ctx.strokePath()
-                        ctx.addPath(path); ctx.setStrokeColor(yarn.cg)
-                        ctx.setLineWidth(sw * 0.3); ctx.strokePath()
-                        ctx.addPath(path); ctx.setStrokeColor(yarn.lighten(0.2).cg)
-                        ctx.setLineWidth(sw * 0.1); ctx.strokePath()
-                    }
-                }
-                ctx.endTransparencyLayer()
-                ctx.restoreGState()
-
-                let shape = CGPath(roundedRect: rect, cornerWidth: T * 0.16, cornerHeight: T * 0.16, transform: nil)
-                Knit.piece(ctx, shape: shape, gap: cw.gap, scale: scale) { ctx in
-                    Knit.stitches(ctx, rect: rect, sw: sw, sh: sh, seed: seed + 2) { c, r in
-                        cw.yarn(r + seed, min(max(c, 0), n - 1), n)
-                    }
-                    Knit.shadeAcross(ctx, rect: rect, horizontal: true)
-                    // A little gathered rib where the fringe is tied on.
-                    let rib = CGRect(x: rect.minX, y: rect.maxY - sh * 1.2, width: rect.width, height: sh * 1.2)
-                    ctx.setFillColor(CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.16))
-                    ctx.fill(rib)
-                }
-            }
-        }
-    }
-
-    /// The knot where the scarf is tied, at one top corner.
-    static func knot(_ cw: Colourway, T: CGFloat, scale: CGFloat) -> CGImage? {
-        cached("knot|\(cw.id)|\(T)|\(scale)") {
-            let size = knotSize(T: T)
-            return Knit.image(size: size, scale: scale) { ctx in
-                let rect = CGRect(x: Knit.pad, y: Knit.pad,
-                                  width: size.width - 2 * Knit.pad, height: size.height - 2 * Knit.pad)
-                let shape = CGPath(ellipseIn: rect, transform: nil)
-                let n = 10
-                let sh = T / CGFloat(n), sw = sh / 0.82
-                Knit.piece(ctx, shape: shape, gap: cw.gap, scale: scale) { ctx in
-                    Knit.stitches(ctx, rect: rect, sw: sw, sh: sh, seed: 4) { c, r in
-                        cw.yarn(c + 5, min(max(r, 0), n - 1), n)
-                    }
-                    let colors = [
-                        CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.10),
-                        CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0),
-                        CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.5),
-                    ] as CFArray
-                    if let g = CGGradient(colorsSpace: Knit.sRGB, colors: colors, locations: [0, 0.45, 1]) {
-                        let c = CGPoint(x: rect.midX - rect.width * 0.08, y: rect.midY - rect.height * 0.14)
-                        ctx.drawRadialGradient(g, startCenter: c, startRadius: 0, endCenter: c,
-                                               endRadius: max(rect.width, rect.height) * 0.62,
-                                               options: [.drawsAfterEndLocation])
-                    }
-                    // Folds where the scarf wraps through itself.
-                    ctx.setLineCap(.round)
-                    for (from, ctrl, to) in [
-                        (CGPoint(x: 0.30, y: 0.12), CGPoint(x: 0.12, y: 0.5), CGPoint(x: 0.34, y: 0.9)),
-                        (CGPoint(x: 0.70, y: 0.12), CGPoint(x: 0.88, y: 0.5), CGPoint(x: 0.66, y: 0.9)),
-                    ] {
-                        let p = CGMutablePath()
-                        func pt(_ u: CGPoint) -> CGPoint {
-                            CGPoint(x: rect.minX + u.x * rect.width, y: rect.minY + u.y * rect.height)
-                        }
-                        p.move(to: pt(from))
-                        p.addQuadCurve(to: pt(to), control: pt(ctrl))
-                        ctx.addPath(p)
-                        ctx.setStrokeColor(CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.32))
-                        ctx.setLineWidth(max(1.2, T * 0.07))
-                        ctx.strokePath()
-                    }
-                }
-            }
-        }
     }
 }

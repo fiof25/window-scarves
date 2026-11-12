@@ -1,9 +1,11 @@
 import AppKit
+import Carbon
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let settings = Settings.shared
     private let tracker = Tracker()
     private var statusItem: NSStatusItem!
+    private var hotKey: HotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -14,10 +16,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
 
         settings.onChange.append { [weak self] in
-            ScarfArt.clearCache()
+            ScarfOverlay.artQueue.async { ScarfArt.clearCache() }
             self?.tracker.refresh()
         }
         tracker.start()
+
+        // ⌘D anywhere turns the scarves on and off.
+        hotKey = HotKey(keyCode: kVK_ANSI_D, modifiers: cmdKey) { [weak self] in
+            self?.settings.enabled.toggle()
+        }
+        if hotKey == nil {
+            FileHandle.standardError.write(Data("Window Scarves: couldn't register ⌘D (another app may own it)\n".utf8))
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -29,8 +39,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
-        menu.addItem(item(settings.enabled ? "Scarves On" : "Scarves Off (paused)", #selector(toggleEnabled),
-                          on: settings.enabled))
+        let onOff = item(settings.enabled ? "Scarves On" : "Scarves Off", #selector(toggleEnabled),
+                         on: settings.enabled, key: "d")
+        onOff.keyEquivalentModifierMask = .command
+        menu.addItem(onOff)
         menu.addItem(.separator())
 
         let colours = NSMenu()
@@ -48,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for side in KnotSide.allCases {
             knot.addItem(item(side.title, #selector(pickKnot(_:)), on: settings.knot == side, value: side.rawValue))
         }
-        menu.addItem(submenu("Knot", knot))
+        menu.addItem(submenu("Hangs Down", knot))
 
         let thick = NSMenu()
         for t in Thickness.allCases {
@@ -69,7 +81,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if apps.items.isEmpty { apps.addItem(NSMenuItem(title: "No windows yet", action: nil, keyEquivalent: "")) }
         menu.addItem(submenu("Apps", apps))
 
-        menu.addItem(item("Autumn Breeze", #selector(toggleBreeze), on: settings.breeze))
+        menu.addItem(item("Buttons on Window Controls", #selector(toggleButtons), on: settings.sewnButtons))
+        if settings.sewnButtons && !WindowControls.trusted {
+            let fit = item("Line Up Buttons Exactly…", #selector(lineUpButtons), on: false)
+            fit.toolTip = "Asks for Accessibility access so each button sits exactly on the real one"
+            menu.addItem(fit)
+        }
         menu.addItem(.separator())
         menu.addItem(item("Quit Window Scarves", #selector(quit), on: false, key: "q"))
     }
@@ -89,7 +106,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleEnabled() { settings.enabled.toggle() }
-    @objc private func toggleBreeze() { settings.breeze.toggle() }
+    @objc private func toggleButtons() { settings.sewnButtons.toggle() }
+    @objc private func lineUpButtons() { WindowControls.askForPermission() }
     @objc private func quit() { NSApp.terminate(nil) }
 
     @objc private func pickColourway(_ sender: NSMenuItem) {
@@ -123,8 +141,7 @@ if let i = args.firstIndex(of: "--render"), i + 1 < args.count {
     try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
     let ok = Catalogue.hero(to: dir + "/hero.png")
         && Catalogue.swatches(to: dir + "/colourways.png")
-        && Catalogue.closeUp(to: dir + "/close-up.png", colourway: Colourways.maplePlaid)
-        && Catalogue.closeUp(to: dir + "/close-up-tucked.png", colourway: Colourways.oatmealHeather, inward: true)
+        && Catalogue.closeUp(to: dir + "/close-up.png", colourway: Colourways.rosehip)
     print(ok ? "Rendered previews into \(dir)" : "Rendering failed")
     exit(ok ? 0 : 1)
 }

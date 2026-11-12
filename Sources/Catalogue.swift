@@ -10,6 +10,11 @@ enum Catalogue {
         var side: KnotSide
     }
 
+    /// Where a mock window's red, yellow and green buttons sit (centres, window-local).
+    static func mockControls(_ r: CGRect) -> [CGPoint] {
+        (0..<3).map { CGPoint(x: 22 + CGFloat($0) * 20, y: 19) }
+    }
+
     static func drawMockWindow(_ ctx: CGContext, _ r: CGRect) {
         let path = CGPath(roundedRect: r, cornerWidth: 14, cornerHeight: 14, transform: nil)
         ctx.saveGState()
@@ -23,18 +28,17 @@ enum Catalogue {
         ctx.saveGState()
         ctx.addPath(path)
         ctx.clip()
-        ctx.setFillColor(CGColor(srgbRed: 0.965, green: 0.952, blue: 0.93, alpha: 1))
+        ctx.setFillColor(CGColor(srgbRed: 0.965, green: 0.955, blue: 0.94, alpha: 1))
         ctx.fill(CGRect(x: r.minX, y: r.minY, width: r.width, height: 38))
-        ctx.setFillColor(CGColor(srgbRed: 0.88, green: 0.86, blue: 0.83, alpha: 1))
+        ctx.setFillColor(CGColor(srgbRed: 0.88, green: 0.87, blue: 0.85, alpha: 1))
         ctx.fill(CGRect(x: r.minX, y: r.minY + 38, width: r.width, height: 1))
         let lights: [UInt32] = [0xFF5F57, 0xFEBC2E, 0x28C840]
-        for (i, hex) in lights.enumerated() {
+        for (c, hex) in zip(mockControls(r), lights) {
             ctx.setFillColor(Yarn(hex).cg)
-            ctx.fillEllipse(in: CGRect(x: r.minX + 16 + CGFloat(i) * 20, y: r.minY + 13, width: 12, height: 12))
+            ctx.fillEllipse(in: CGRect(x: r.minX + c.x - 6, y: r.minY + c.y - 6, width: 12, height: 12))
         }
-        // A few lines of pretend content.
-        ctx.setFillColor(CGColor(srgbRed: 0.9, green: 0.885, blue: 0.86, alpha: 1))
-        var y = r.minY + 62
+        ctx.setFillColor(CGColor(srgbRed: 0.91, green: 0.9, blue: 0.885, alpha: 1))
+        var y = r.minY + 70
         var k = 0
         while y < r.maxY - 30 {
             let w = (r.width - 64) * (k % 3 == 2 ? 0.55 : (k % 2 == 0 ? 0.9 : 0.75))
@@ -46,16 +50,34 @@ enum Catalogue {
         ctx.restoreGState()
     }
 
+    static func drawPlaced(_ ctx: CGContext, _ img: CGImage, _ p: Placement, origin: CGPoint) {
+        ctx.saveGState()
+        ctx.translateBy(x: origin.x + p.anchor.x, y: origin.y + p.anchor.y)
+        ctx.rotate(by: -p.angle)
+        let rect = CGRect(x: -p.anchorUnit.x * p.size.width, y: -p.anchorUnit.y * p.size.height,
+                          width: p.size.width, height: p.size.height)
+        ctx.translateBy(x: 0, y: rect.minY + rect.maxY)
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.draw(img, in: rect)
+        ctx.restoreGState()
+    }
+
     static func drawScarf(_ ctx: CGContext, on r: CGRect, colourway cw: Colourway, side: KnotSide,
-                          T: CGFloat, scale: CGFloat, inward: Bool = false) {
+                          T: CGFloat, scale: CGFloat) {
         let tl = ScarfLayout.tailLength(height: r.height, T: T)
-        for p in ScarfLayout.placements(size: r.size, T: T, side: side, tailLength: tl, inward: inward) {
-            guard let img = ScarfLayout.image(for: p, colourway: cw, T: T, scale: scale) else { continue }
+        for p in ScarfLayout.placements(size: r.size, T: T, side: side, tailLength: tl) {
+            if let img = ScarfLayout.image(for: p, colourway: cw, scale: scale) {
+                drawPlaced(ctx, img, p, origin: r.origin)
+            }
+        }
+        // Sewn-on buttons over the window's own.
+        let d: CGFloat = 14
+        for (k, c) in mockControls(r).enumerated() {
+            guard let img = SewnButtons.image(k, diameter: d, scale: scale) else { continue }
+            let pad = SewnButtons.padding(d)
+            let rect = CGRect(x: r.minX + c.x - d / 2 - pad, y: r.minY + c.y - d / 2 - pad,
+                              width: d + 2 * pad, height: d + 2 * pad)
             ctx.saveGState()
-            ctx.translateBy(x: r.minX + p.anchor.x, y: r.minY + p.anchor.y)
-            ctx.rotate(by: -p.angle)
-            let rect = CGRect(x: -p.anchorUnit.x * p.size.width, y: -p.anchorUnit.y * p.size.height,
-                              width: p.size.width, height: p.size.height)
             ctx.translateBy(x: 0, y: rect.minY + rect.maxY)
             ctx.scaleBy(x: 1, y: -1)
             ctx.draw(img, in: rect)
@@ -79,7 +101,7 @@ enum Catalogue {
     }
 
     static func background(_ ctx: CGContext, _ size: CGSize) {
-        let colors = [Yarn(0xF6EBD6).cg, Yarn(0xEED9B8).cg] as CFArray
+        let colors = [Yarn(0xFDF3E3).cg, Yarn(0xF6E2C6).cg] as CFArray
         if let g = CGGradient(colorsSpace: Knit.sRGB, colors: colors, locations: [0, 1]) {
             ctx.drawLinearGradient(g, start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
         }
@@ -92,15 +114,15 @@ enum Catalogue {
         return CGImageDestinationFinalize(dest)
     }
 
-    /// A few overlapping windows, each wearing a different scarf.
+    /// A few overlapping windows, each wearing a scarf.
     static func hero(to path: String, scale: CGFloat = 2) -> Bool {
-        let size = CGSize(width: 1500, height: 920)
-        let T: CGFloat = 30
+        let size = CGSize(width: 1500, height: 940)
+        let T: CGFloat = 34
         let windows = [
-            MockWindow(frame: CGRect(x: 120, y: 110, width: 640, height: 430), colourway: Colourways.maplePlaid, side: .right),
-            MockWindow(frame: CGRect(x: 860, y: 90, width: 520, height: 360), colourway: Colourways.forestZigzag, side: .left),
-            MockWindow(frame: CGRect(x: 300, y: 420, width: 560, height: 380), colourway: Colourways.pumpkinSpice, side: .right),
-            MockWindow(frame: CGRect(x: 940, y: 520, width: 450, height: 300), colourway: Colourways.harvestFairIsle, side: .right),
+            MockWindow(frame: CGRect(x: 110, y: 120, width: 640, height: 430), colourway: Colourways.rosehip, side: .right),
+            MockWindow(frame: CGRect(x: 880, y: 100, width: 500, height: 360), colourway: Colourways.marigold, side: .left),
+            MockWindow(frame: CGRect(x: 330, y: 470, width: 560, height: 370), colourway: Colourways.buffaloCheck, side: .right),
+            MockWindow(frame: CGRect(x: 960, y: 540, width: 420, height: 300), colourway: Colourways.evergreen, side: .right),
         ]
         guard let img = Knit.image(size: size, scale: scale, { ctx in
             background(ctx, size)
@@ -115,7 +137,7 @@ enum Catalogue {
     /// Every colourway on its own little window, with its name underneath.
     static func swatches(to path: String, scale: CGFloat = 2) -> Bool {
         let cols = 4
-        let cell = CGSize(width: 380, height: 330)
+        let cell = CGSize(width: 390, height: 360)
         let all = Colourways.all
         let rows = (all.count + cols - 1) / cols
         let size = CGSize(width: CGFloat(cols) * cell.width + 40, height: CGFloat(rows) * cell.height + 40)
@@ -124,27 +146,26 @@ enum Catalogue {
             for (k, cw) in all.enumerated() {
                 let ox = 20 + CGFloat(k % cols) * cell.width
                 let oy = 20 + CGFloat(k / cols) * cell.height
-                let r = CGRect(x: ox + 50, y: oy + 50, width: 240, height: 190)
+                let r = CGRect(x: ox + 50, y: oy + 60, width: 270, height: 200)
                 drawMockWindow(ctx, r)
-                drawScarf(ctx, on: r, colourway: cw, side: .right, T: 24, scale: scale)
-                drawText(ctx, cw.name, at: CGPoint(x: ox + 50, y: oy + 282), size: 17, weight: .semibold,
+                drawScarf(ctx, on: r, colourway: cw, side: .right, T: 28, scale: scale)
+                drawText(ctx, cw.name, at: CGPoint(x: ox + 50, y: oy + 306), size: 17, weight: .semibold,
                          colour: Yarn(0x4A2E1E))
-                drawText(ctx, cw.blurb, at: CGPoint(x: ox + 50, y: oy + 304), size: 12.5, weight: .regular,
+                drawText(ctx, cw.blurb, at: CGPoint(x: ox + 50, y: oy + 328), size: 12.5, weight: .regular,
                          colour: Yarn(0x7A5A44))
             }
         }) else { return false }
         return write(img, to: path)
     }
 
-    /// A close-up of the knit, to check stitch detail. `inward` shows the tucked-in fit used
-    /// when a window fills the screen.
-    static func closeUp(to path: String, colourway cw: Colourway, scale: CGFloat = 3, inward: Bool = false) -> Bool {
-        let size = CGSize(width: 420, height: 380)
-        let r = CGRect(x: 30, y: 70, width: inward ? 390 : 300, height: 400)
+    /// A close-up of the knit, to check stitch detail.
+    static func closeUp(to path: String, colourway cw: Colourway, scale: CGFloat = 3) -> Bool {
+        let size = CGSize(width: 640, height: 470)
+        let r = CGRect(x: 120, y: 110, width: 380, height: 300)
         guard let img = Knit.image(size: size, scale: scale, { ctx in
             background(ctx, size)
             drawMockWindow(ctx, r)
-            drawScarf(ctx, on: r, colourway: cw, side: .right, T: 32, scale: scale, inward: inward)
+            drawScarf(ctx, on: r, colourway: cw, side: .right, T: 38, scale: scale)
         }) else { return false }
         return write(img, to: path)
     }

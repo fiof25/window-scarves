@@ -25,6 +25,8 @@ struct Yarn {
     func lighten(_ t: CGFloat) -> Yarn { mix(Yarn(0xFFFFFF), t) }
 
     var cg: CGColor { CGColor(srgbRed: r, green: g, blue: b, alpha: 1) }
+
+    func cg(alpha: CGFloat) -> CGColor { CGColor(srgbRed: r, green: g, blue: b, alpha: alpha) }
 }
 
 @inline(__always) func pmod(_ a: Int, _ m: Int) -> Int {
@@ -48,114 +50,100 @@ func noise01(_ a: Int, _ b: Int, _ c: Int) -> CGFloat {
 
 /// A scarf colourway: a set of yarns plus a knitting chart.
 ///
-/// The chart is called with `i` = stitch index along the scarf's length,
-/// `j` = stitch index across the scarf's width, and `n` = stitches across.
+/// The chart is called with `i` = row along the scarf, `j` = stitch across it, `n` = stitches
+/// across, and `fromEnd` = rows from the nearer fringed end, so colourways can add stripes
+/// near the ends like a real scarf.
 struct Colourway {
     let id: String
     let name: String
     let blurb: String
     let yarns: [Yarn]
-    /// Yarn index used for the fringe, or nil to continue each column's colour.
-    let fringe: Int?
-    let chart: (_ i: Int, _ j: Int, _ n: Int) -> Int
+    /// Yarn index used for the fringe.
+    let fringe: Int
+    let chart: (_ i: Int, _ j: Int, _ n: Int, _ fromEnd: Int) -> Int
 
-    func yarn(_ i: Int, _ j: Int, _ n: Int) -> Yarn {
-        yarns[pmod(chart(i, j, n), yarns.count)]
+    func yarn(_ i: Int, _ j: Int, _ n: Int, _ fromEnd: Int) -> Yarn {
+        yarns[pmod(chart(i, j, n, fromEnd), yarns.count)]
     }
 
-    /// The dark colour that shows in the gaps between stitches.
-    var gap: Yarn { yarns[0].shade(0.42) }
+    /// The colour that shows in the little gaps between stitches.
+    var gap: Yarn { yarns[0].shade(0.74) }
+    /// Soft halo fibres around the edge.
+    var fuzz: Yarn { yarns[0].lighten(0.42) }
+    var fringeYarn: Yarn { yarns[fringe] }
+}
+
+/// Two stripes just above the fringe, like a classic scarf.
+private func endStripes(_ fromEnd: Int) -> Bool {
+    [3, 4, 7, 8].contains(fromEnd)
 }
 
 enum Colourways {
-    static let pumpkinSpice = Colourway(
-        id: "pumpkin-spice", name: "Pumpkin Spice",
-        blurb: "pumpkin, cream and cinnamon stripes",
-        yarns: [Yarn(0xD9742B), Yarn(0xF2E4C9), Yarn(0x8A4528)], fringe: 0
-    ) { i, _, _ in
-        let seq = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 1, 1]
-        return seq[pmod(i, seq.count)]
+    static let cream = Yarn(0xF4EADA)
+
+    static let rosehip = Colourway(
+        id: "rosehip", name: "Rosehip",
+        blurb: "a soft, warm red with cream stripes at the ends",
+        yarns: [Yarn(0xC5483E), cream], fringe: 0
+    ) { _, _, _, fromEnd in endStripes(fromEnd) ? 1 : 0 }
+
+    static let candyStripe = Colourway(
+        id: "candy-stripe", name: "Candy Stripe",
+        blurb: "wide rosehip and cream stripes",
+        yarns: [Yarn(0xC5483E), cream], fringe: 0
+    ) { i, _, _, _ in pmod(i, 16) < 8 ? 0 : 1 }
+
+    static let pumpkinPatch = Colourway(
+        id: "pumpkin-patch", name: "Pumpkin Patch",
+        blurb: "warm pumpkin with the odd cream stripe",
+        yarns: [Yarn(0xDE7B3A), cream], fringe: 0
+    ) { i, _, _, fromEnd in
+        if endStripes(fromEnd) { return 1 }
+        return fromEnd > 12 && pmod(i, 34) < 2 ? 1 : 0
     }
 
-    static let maplePlaid = Colourway(
-        id: "maple-plaid", name: "Maple Plaid",
-        blurb: "red and charcoal tartan with a mustard thread",
-        yarns: [Yarn(0xB3392C), Yarn(0x2A1D19), Yarn(0xE0A93E), Yarn(0x7A2219)], fringe: 0
-    ) { i, j, n in
-        let a = pmod(i, 14)
-        let dj = abs(Double(j) - Double(n - 1) / 2)
-        let darkRow = a < 4
-        let darkCol = dj < 1.0
-        if a == 8 { return 2 }
+    static let marigold = Colourway(
+        id: "marigold", name: "Marigold",
+        blurb: "honey yellow with burnt-orange tips",
+        yarns: [Yarn(0xE6AE42), Yarn(0xCB6E30)], fringe: 0
+    ) { _, _, _, fromEnd in endStripes(fromEnd) ? 1 : 0 }
+
+    static let buffaloCheck = Colourway(
+        id: "buffalo-check", name: "Buffalo Check",
+        blurb: "soft red and charcoal lumberjack checks",
+        yarns: [Yarn(0xBF4038), Yarn(0x30272A), Yarn(0x7C302C)], fringe: 0
+    ) { i, j, n, _ in
+        let darkRow = pmod(fdiv(i, 5), 2) == 1
+        let darkCol = (j * 2) / max(1, n) == 1
         if darkRow && darkCol { return 1 }
-        if darkRow || darkCol { return pmod(i + j, 2) == 0 ? 1 : 3 }
+        if darkRow || darkCol { return 2 }
         return 0
     }
 
-    static let harvestFairIsle = Colourway(
-        id: "harvest-fair-isle", name: "Harvest Fair Isle",
-        blurb: "rust with cream diamonds and a mustard border",
-        yarns: [Yarn(0xB4532A), Yarn(0xF0DFBF), Yarn(0xD99A2B), Yarn(0x5B2F1F)], fringe: 0
-    ) { i, j, n in
-        if j <= 0 || j >= n - 1 { return 3 }
-        if j == 1 || j == n - 2 { return pmod(i, 2) == 0 ? 2 : 0 }
-        let m = pmod(i, 12)
-        let dj = abs(Double(j) - Double(n - 1) / 2)
-        if m == 6 && dj < 1 { return 2 }
-        if Double(abs(m - 6)) + dj <= 2.6 { return 1 }
-        if m == 0 && dj < 1 { return 1 }
-        return 0
+    static let evergreen = Colourway(
+        id: "evergreen", name: "Evergreen",
+        blurb: "mossy pine green with cream stripes",
+        yarns: [Yarn(0x4A8C62), cream], fringe: 0
+    ) { i, _, _, fromEnd in
+        if endStripes(fromEnd) { return 1 }
+        return fromEnd > 12 && pmod(i, 40) < 2 ? 1 : 0
     }
 
-    static let forestZigzag = Colourway(
-        id: "forest-zigzag", name: "Forest Zigzag",
-        blurb: "pine green with a cream zigzag and moss edges",
-        yarns: [Yarn(0x2E5234), Yarn(0xEADCBD), Yarn(0x7D8B3E)], fringe: 0
-    ) { i, j, n in
-        if j <= 0 || j >= n - 1 { return 2 }
-        let span = max(1, n - 3)
-        let m = pmod(i, 2 * span)
-        let z = m <= span ? m : 2 * span - m
-        return j == z + 1 ? 1 : 0
-    }
-
-    static let cranberryFleck = Colourway(
-        id: "cranberry-fleck", name: "Cranberry Fleck",
-        blurb: "cranberry with cream flecks and rosy stripes",
-        yarns: [Yarn(0x8C2234), Yarn(0xF1E3CB), Yarn(0xC0505A)], fringe: 0
-    ) { i, j, _ in
-        let m = pmod(i, 24)
-        if m == 0 || m == 1 { return 1 }
-        if m == 3 || m == 22 { return 2 }
-        if knitHash(i, j, 3) % 11 == 0 { return 1 }
-        return 0
-    }
-
-    static let appleCiderCheck = Colourway(
-        id: "apple-cider-check", name: "Apple Cider Check",
-        blurb: "mustard and toffee checks",
-        yarns: [Yarn(0xC88A2C), Yarn(0x6B3E22)], fringe: 1
-    ) { i, j, _ in
-        pmod(fdiv(i, 2) + fdiv(j, 2), 2)
-    }
-
-    static let oatmealHeather = Colourway(
-        id: "oatmeal-heather", name: "Oatmeal Heather",
-        blurb: "soft oat with walnut and cream flecks",
-        yarns: [Yarn(0xD9C7A5), Yarn(0x8E6B49), Yarn(0xF2E8D5)], fringe: 0
-    ) { i, j, _ in
-        let h = knitHash(i, j, 11)
-        if h % 19 == 0 { return 1 }
-        if h % 13 == 0 { return 2 }
-        return 0
+    static let raspberry = Colourway(
+        id: "raspberry", name: "Raspberry",
+        blurb: "dusty berry pink with thin blush stripes",
+        yarns: [Yarn(0xC25578), Yarn(0xF3D9E1)], fringe: 0
+    ) { i, _, _, fromEnd in
+        if endStripes(fromEnd) { return 1 }
+        return pmod(i, 10) == 0 ? 1 : 0
     }
 
     static let all: [Colourway] = [
-        pumpkinSpice, maplePlaid, harvestFairIsle, forestZigzag,
-        cranberryFleck, appleCiderCheck, oatmealHeather,
+        rosehip, candyStripe, pumpkinPatch, marigold, buffaloCheck, evergreen, raspberry,
     ]
 
     static let byAppID = "by-app"
+    static let defaultID = rosehip.id
 
     static func byID(_ id: String) -> Colourway? { all.first { $0.id == id } }
 

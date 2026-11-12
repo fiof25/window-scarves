@@ -78,7 +78,20 @@ final class Tracker {
         var id: CGWindowID
         var frame: CGRect
         var owner: String
+        var pid: pid_t
         var index: Int
+    }
+
+    /// Exact button positions found via Accessibility, per window, with the size they were found at.
+    private var controlsCache: [CGWindowID: (size: CGSize, controls: WindowControls.Controls)] = [:]
+
+    private func controls(for t: Target) -> WindowControls.Controls? {
+        guard settings.sewnButtons else { return nil }
+        if let c = controlsCache[t.id], c.size == t.frame.size || mouseDown { return c.controls.centres.isEmpty ? nil : c.controls }
+        guard WindowControls.trusted else { return WindowControls.estimate }
+        let found = WindowControls.lookup(pid: t.pid, windowFrame: t.frame) ?? WindowControls.estimate
+        controlsCache[t.id] = (t.frame.size, found)
+        return found.centres.isEmpty ? nil : found
     }
 
     private func screenRectsCG() -> [CGRect] {
@@ -108,7 +121,7 @@ final class Tracker {
             let id = CGWindowID(num)
             index[id] = i
             guard (w[kCGWindowLayer as String] as? Int) == 0,
-                  (w[kCGWindowOwnerPID as String] as? Int32) != myPID else { continue }
+                  let pid = w[kCGWindowOwnerPID as String] as? Int32, pid != myPID else { continue }
             let owner = w[kCGWindowOwnerName as String] as? String ?? ""
             if ignoredOwners.contains(owner) { continue }
             if let alpha = w[kCGWindowAlpha as String] as? Double, alpha < 0.1 { continue }
@@ -119,7 +132,7 @@ final class Tracker {
             if screens.contains(where: { abs($0.width - rect.width) < 2 && abs($0.height - rect.height) < 2 }) { continue }
             apps.insert(owner)
             if skipped.contains(owner) { continue }
-            targets.append(Target(id: id, frame: rect, owner: owner, index: i))
+            targets.append(Target(id: id, frame: rect, owner: owner, pid: pid, index: i))
         }
         recentApps.formUnion(apps)
 
@@ -130,7 +143,10 @@ final class Tracker {
         for (id, overlay) in overlays where !live.contains(id) {
             overlay.hide()
             // Forget windows that have been gone a while (closed, or on another Space for ages).
-            if now.timeIntervalSince(overlay.lastSeen) > 60 { overlays[id] = nil }
+            if now.timeIntervalSince(overlay.lastSeen) > 60 {
+                overlays[id] = nil
+                controlsCache[id] = nil
+            }
         }
 
         let T = settings.thickness.points
@@ -142,13 +158,15 @@ final class Tracker {
             }()
             overlay.lastSeen = now
             let cw = settings.colourway(forApp: t.owner)
+            // Hang on the preferred side unless only the other side has room on screen.
             let screen = screens.first { $0.contains(CGPoint(x: t.frame.midX, y: t.frame.minY + 1)) }
                 ?? screens.first { $0.intersects(t.frame) } ?? t.frame
-            let (side, inward) = ScarfLayout.fit(preferred: settings.knot,
-                                                 roomLeft: t.frame.minX - screen.minX,
-                                                 roomRight: screen.maxX - t.frame.maxX, T: T)
-            let style = ScarfStyle(colourway: cw.id, T: T, side: side, inward: inward, breeze: settings.breeze)
-            overlay.update(frame: t.frame, colourway: cw, style: style, live: mouseDown)
+            let room = { (s: KnotSide) in s == .right ? screen.maxX - t.frame.maxX : t.frame.minX - screen.minX }
+            var side = settings.knot
+            let other: KnotSide = side == .right ? .left : .right
+            if room(side) < ScarfLayout.roomNeeded(T: T), room(other) >= ScarfLayout.roomNeeded(T: T) { side = other }
+            let style = ScarfStyle(colourway: cw.id, T: T, side: side)
+            overlay.update(frame: t.frame, colourway: cw, style: style, controls: controls(for: t), live: mouseDown)
 
             // Keep the scarf directly above its own window.
             let overlayIndex = index[CGWindowID(overlay.window.windowNumber)]
