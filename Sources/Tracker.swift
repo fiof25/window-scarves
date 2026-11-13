@@ -624,18 +624,31 @@ final class Tracker {
             let T = (thickness * cw.weight).rounded()
 
             var style: ScarfStyle
-            if mouseDown, let current = overlay.style, current.colourway == cw.id, current.T == T {
-                // Mid-drag: keep the scarf's drape as it is. Re-fitting it every time the window
-                // crosses a screen edge would make it flicker; it settles when the button is released.
+            let current = overlay.style
+            let sameKnot = overlay.fittedKnot == settings.knot
+            if let current, current.colourway == cw.id, current.T == T, sameKnot,
+               mouseDown || overlay.fittedSize == t.frame.size {
+                // Mid-drag, or moved but not resized: keep the scarf exactly as it is. Its long end
+                // stays on the same side and nothing is tucked or dropped when the window is let go.
                 style = current
             } else {
                 // Fit the scarf to the free space on screen either side of the window.
                 let screen = visible.first {
                     $0.insetBy(dx: -1, dy: -40).contains(CGPoint(x: t.frame.midX, y: t.frame.minY))
                 } ?? visible.first { $0.intersects(t.frame) } ?? t.frame.insetBy(dx: -200, dy: -200)
-                let (side, fit) = ScarfLayout.fit(preferred: settings.knot, roomLeft: t.frame.minX - screen.minX,
-                                                  roomRight: screen.maxX - t.frame.maxX, T: T)
+                let roomLeft = t.frame.minX - screen.minX, roomRight = screen.maxX - t.frame.maxX
+                let side: KnotSide, fit: ScarfFit
+                if let current, sameKnot {
+                    // A scarf already on, its window resized: the long end stays on its side.
+                    (side, fit) = ScarfLayout.refit(keeping: current.side, roomLeft: roomLeft,
+                                                    roomRight: roomRight, T: T)
+                } else {
+                    (side, fit) = ScarfLayout.fit(preferred: settings.knot, roomLeft: roomLeft,
+                                                  roomRight: roomRight, T: T)
+                }
                 style = ScarfStyle(colourway: cw.id, T: T, side: side, fit: fit)
+                overlay.fittedKnot = settings.knot
+                overlay.fittedSize = t.frame.size
             }
             overlay.update(frame: t.frame, colourway: cw, style: style)
 

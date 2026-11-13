@@ -134,6 +134,15 @@ enum SelfTest {
         expect(side == .right && fit.tuck > 0, "a tucked-in long end must go on the right, away from the window's buttons")
         (side, fit) = ScarfLayout.fit(preferred: .left, roomLeft: 300, roomRight: 300, T: T)
         expect(side == .left && fit == .roomy, "with room, the long end should go on the chosen side")
+        // Re-fitting a scarf that's already on, after a resize.
+        (side, fit) = ScarfLayout.refit(keeping: .left, roomLeft: 300, roomRight: 0, T: T)
+        expect(side == .left && fit.tuck == 0 && !fit.shortEnd, "a resized scarf should keep its long end on the left")
+        (side, fit) = ScarfLayout.refit(keeping: .right, roomLeft: 300, roomRight: 0, T: T)
+        expect(side == .right && fit.tuck > 0 && fit.shortEnd, "a resized scarf should keep its long end on the right, tucked in")
+        (side, fit) = ScarfLayout.refit(keeping: .left, roomLeft: 0, roomRight: 300, T: T)
+        expect(side == .right && fit.tuck == 0, "a long end on the left must never tuck in over the window's buttons")
+        (side, fit) = ScarfLayout.refit(keeping: .left, roomLeft: 0, roomRight: 0, T: T)
+        expect(side == .right && fit.tuck > 0, "with no room anywhere, a resized scarf tucks in on the right")
 
         // 5. The collection itself.
         expect(Set(Colourways.all.map(\.id)).count == Colourways.all.count, "two scarves share an id")

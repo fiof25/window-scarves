@@ -144,6 +144,24 @@ enum ScarfLayout {
         if room(preferred) >= want { side = preferred }
         else if room(other) >= want { side = other }
         else { side = .right }
+        return (side, fit(side: side, roomLeft: roomLeft, roomRight: roomRight, T: T))
+    }
+
+    /// Re-fit a scarf that's already on, after its window is resized: the long end stays on
+    /// `side`, tucking in there if there's no room. The one exception is a long end on the left
+    /// with no room there, which would tuck in over the window's buttons, so it moves right.
+    static func refit(keeping side: KnotSide, roomLeft: CGFloat, roomRight: CGFloat, T: CGFloat) -> (KnotSide, ScarfFit) {
+        if side == .left && roomLeft < roomWanted(T: T) {
+            return fit(preferred: .left, roomLeft: roomLeft, roomRight: roomRight, T: T)
+        }
+        return (side, fit(side: side, roomLeft: roomLeft, roomRight: roomRight, T: T))
+    }
+
+    /// How the scarf fits with its long end kept on `side`, whatever the room: tucked in on
+    /// that side if there's no room there, and without its short end if there's none on the other.
+    static func fit(side: KnotSide, roomLeft: CGFloat, roomRight: CGFloat, T: CGFloat) -> ScarfFit {
+        let want = roomWanted(T: T)
+        let room = { (s: KnotSide) in s == .right ? roomRight : roomLeft }
         let far: KnotSide = side == .right ? .left : .right
         var fit = ScarfFit()
         if room(side) < want {
@@ -152,7 +170,7 @@ enum ScarfLayout {
             fit.tuck = min(0.9 * T, ((want - max(room(side), 0)) / step).rounded(.up) * step)
         }
         fit.shortEnd = room(far) >= want
-        return (side, fit)
+        return fit
     }
 
     /// The scarf, cut into images that sit side by side without overlapping.

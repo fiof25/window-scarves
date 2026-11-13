@@ -79,6 +79,10 @@ final class ScarfOverlay {
     /// Bookkeeping for keeping the scarf directly above its window (see `Tracker`).
     var lastOrder: CFTimeInterval = 0
     var orderMisses = 0
+    /// The Long End setting and window size the scarf's drape was last worked out for. Moving
+    /// the window keeps the drape as it is; only a resize or a new Long End setting re-fits it.
+    var fittedKnot: KnotSide?
+    var fittedSize: CGSize = .zero
 
     init(targetID: CGWindowID) {
         self.targetID = targetID
