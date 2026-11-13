@@ -192,6 +192,11 @@ if let i = args.firstIndex(of: "--render-icon"), i + 1 < args.count {
     exit(Catalogue.icon(to: args[i + 1]) ? 0 : 1)
 }
 
+// `--render-social <file.png>` draws the 1280 x 640 picture for link previews.
+if let i = args.firstIndex(of: "--render-social"), i + 1 < args.count {
+    exit(Catalogue.social(to: args[i + 1]) ? 0 : 1)
+}
+
 // `--self-test` checks the scarf-making code without touching any real windows.
 if args.contains("--self-test") {
     exit(SelfTest.run() ? 0 : 1)

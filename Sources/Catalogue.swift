@@ -120,6 +120,38 @@ enum Catalogue {
         return write(img, to: path)
     }
 
+    /// The picture link previews show (GitHub's "social preview"): 1280 x 640, the size GitHub
+    /// asks for. Drawn at twice that and scaled down, so the knitting stays crisp. The lower
+    /// windows run off the bottom edge, where sites lay a caption strip over the picture.
+    static func social(to path: String) -> Bool {
+        let size = CGSize(width: 1280, height: 640)
+        let T: CGFloat = 35
+        // Symmetrical: two windows at the back, two small ones peeking up in the bottom corners,
+        // and one in front in the middle. Long ends hang on the outer sides.
+        let windows = [
+            MockWindow(frame: CGRect(x: 96, y: 100, width: 424, height: 290), colourway: Colourways.lilacCheck, side: .left),
+            MockWindow(frame: CGRect(x: 760, y: 100, width: 424, height: 290), colourway: Colourways.creamCable, side: .right),
+            MockWindow(frame: CGRect(x: 96, y: 480, width: 234, height: 260), colourway: Colourways.cocoaCheck, side: .left),
+            MockWindow(frame: CGRect(x: 950, y: 480, width: 234, height: 260), colourway: Colourways.blush, side: .right),
+            MockWindow(frame: CGRect(x: 420, y: 282, width: 440, height: 460), colourway: Colourways.rosehip, side: .right),
+        ]
+        guard let big = Knit.image(size: size, scale: 2, { ctx in
+            background(ctx, size)
+            for w in windows {
+                drawMockWindow(ctx, w.frame)
+                // The cable knit is the heaviest scarf; a touch slimmer here keeps it clear of the buttons.
+                let thickness = w.colourway.id == Colourways.creamCable.id ? T - 4 : T
+                drawScarf(ctx, on: w.frame, colourway: w.colourway, side: w.side, T: thickness, scale: 2)
+            }
+        }), let small = CGContext(data: nil, width: Int(size.width), height: Int(size.height), bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: Knit.sRGB,
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return false }
+        small.interpolationQuality = .high
+        small.draw(big, in: CGRect(origin: .zero, size: size))
+        guard let img = small.makeImage() else { return false }
+        return write(img, to: path)
+    }
+
     /// Every scarf on its own little window, with just its name underneath.
     static func swatches(to path: String, scale: CGFloat = 2) -> Bool {
         let cols = 3

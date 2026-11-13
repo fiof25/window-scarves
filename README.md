@@ -56,6 +56,9 @@ The scarf never covers the red, yellow and green buttons. If there's no room bes
 # Render the preview images in docs/
 "build/Window Scarves.app/Contents/MacOS/WindowScarves" --render docs
 
+# Render the 1280x640 picture for link previews (upload it under Settings > Social preview)
+"build/Window Scarves.app/Contents/MacOS/WindowScarves" --render-social docs/social-preview.png
+
 # Run the self-test
 "build/Window Scarves.app/Contents/MacOS/WindowScarves" --self-test
 
