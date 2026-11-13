@@ -430,11 +430,27 @@ final class Tracker {
         // gone, read the answer to the question in progress, then ask the next one.
         let clock = CACurrentMediaTime()
         if !attached.isEmpty { attached = attached.filter { index[$0] != nil } }
+        if !attached.isEmpty {
+            // macOS keeps an attached window glued directly above a window of its own app. One
+            // found anywhere else was misjudged (the windows moved while it was being asked
+            // about): it's a window in its own right after all.
+            for (k, w) in sizeable.enumerated() where attached.contains(w.id) {
+                if k + 1 >= sizeable.count || sizeable[k + 1].pid != w.pid {
+                    attached.remove(w.id)
+                    log("window \(w.id) isn't attached after all: scarf back on")
+                }
+            }
+        }
         if !standalone.isEmpty { standalone = standalone.filter { index[$0] != nil } }
         let probeIndex = probeWindow.flatMap { CGWindowID(exactly: $0.windowNumber) }.flatMap { index[$0] }
         if let p = probing {
-            if let pi = probeIndex, let ci = index[p.child], index[p.parent] != nil {
-                if pi < ci {
+            if let pi = probeIndex, let ci = index[p.child], let parentIndex = index[p.parent] {
+                if ci > parentIndex {
+                    // The windows were re-stacked before the answer came (a click brought the
+                    // parent forward, say), so the probe now sits above both and proves nothing.
+                    // Ask again later rather than mistake a window of its own for a drop-down.
+                    log("window \(p.child) went behind \(p.parent) mid-question: asking again")
+                } else if pi < ci {
                     attached.insert(p.child)
                     log("window \(p.child) is attached to \(p.parent): no scarf")
                 } else {
@@ -472,7 +488,9 @@ final class Tracker {
             // A window that fills the screen (full screen, or maximised edge to edge) goes bare.
             if Tracker.fillsScreen(w.frame, screens) { continue }
             // So do popovers, hover cards and small dialogs sitting on top of their app's window.
-            if Tracker.isPopover(w, above: sizeable[(k + 1)...]) { continue }
+            // But a window that has already worn a scarf is a window in its own right: it keeps
+            // it when it's clicked in front of a bigger window of the same app.
+            if overlays[w.id] == nil, Tracker.isPopover(w, above: sizeable[(k + 1)...]) { continue }
             apps.insert(w.owner)
             targets.append(w)
         }
@@ -481,6 +499,32 @@ final class Tracker {
         // "Front window only" means the real front window; if its app is unticked, nothing wears one.
         if settings.frontOnly { targets = Array(targets.prefix(1)) }
         targets.removeAll { skipped.contains($0.owner) }
+
+        // Switching tabs in a tabbed window (Finder, Terminal, and others) swaps in a different
+        // window at exactly the same place and hides the old one. Rather than take the scarf off
+        // and knit a new one for the new window, which made scarves vanish for a moment on every
+        // tab switch, hand the scarf across.
+        let now = Date()
+        let current = Set(targets.map(\.id))
+        for t in targets where overlays[t.id]?.isShown != true {
+            guard let match = overlays.first(where: { id, o in
+                id != t.id && !current.contains(id) && o.pid == t.pid
+                    && now.timeIntervalSince(o.lastSeen) < 0.5
+                    && abs(o.targetFrame.minX - t.frame.minX) < 2 && abs(o.targetFrame.minY - t.frame.minY) < 2
+                    && abs(o.targetFrame.width - t.frame.width) < 2 && abs(o.targetFrame.height - t.frame.height) < 2
+            }) else { continue }
+            let (oldID, overlay) = match
+            overlays[oldID] = nil
+            overlay.moveTo(t.id)
+            overlay.orderMisses = 0
+            overlay.lastOrder = 0
+            overlays[t.id] = overlay
+            settling[t.id] = nil
+            standalone.insert(t.id)
+            if lifted?.id == oldID { lifted?.id = t.id }
+            if let at = sweptAt.removeValue(forKey: oldID) { sweptAt[t.id] = at }
+            log("tab switched in \(t.owner): scarf handed from \(oldID) to \(t.id)")
+        }
 
         // A window that has only just appeared may still be animating open, and macOS reports
         // it at the wrong size while it does. Wait until it has held still for a moment before
@@ -539,7 +583,6 @@ final class Tracker {
             stayFast(0.5)
         }
 
-        let now = Date()
         for (id, overlay) in overlays where seen[id] == nil {
             overlay.hide()
             if lifted?.id == id { settleLifted() }
@@ -576,22 +619,36 @@ final class Tracker {
                 return o
             }()
             overlay.lastSeen = now
+            overlay.pid = t.pid
             let cw = settings.colourway(forApp: t.owner)
             let T = (thickness * cw.weight).rounded()
 
             var style: ScarfStyle
-            if mouseDown, let current = overlay.style, current.colourway == cw.id, current.T == T {
-                // Mid-drag: keep the scarf's drape as it is. Re-fitting it every time the window
-                // crosses a screen edge would make it flicker; it settles when the button is released.
+            let current = overlay.style
+            let sameKnot = overlay.fittedKnot == settings.knot
+            if let current, current.colourway == cw.id, current.T == T, sameKnot,
+               mouseDown || overlay.fittedSize == t.frame.size {
+                // Mid-drag, or moved but not resized: keep the scarf exactly as it is. Its long end
+                // stays on the same side and nothing is tucked or dropped when the window is let go.
                 style = current
             } else {
                 // Fit the scarf to the free space on screen either side of the window.
                 let screen = visible.first {
                     $0.insetBy(dx: -1, dy: -40).contains(CGPoint(x: t.frame.midX, y: t.frame.minY))
                 } ?? visible.first { $0.intersects(t.frame) } ?? t.frame.insetBy(dx: -200, dy: -200)
-                let (side, fit) = ScarfLayout.fit(preferred: settings.knot, roomLeft: t.frame.minX - screen.minX,
-                                                  roomRight: screen.maxX - t.frame.maxX, T: T)
+                let roomLeft = t.frame.minX - screen.minX, roomRight = screen.maxX - t.frame.maxX
+                let side: KnotSide, fit: ScarfFit
+                if let current, sameKnot {
+                    // A scarf already on, its window resized: the long end stays on its side.
+                    (side, fit) = ScarfLayout.refit(keeping: current.side, roomLeft: roomLeft,
+                                                    roomRight: roomRight, T: T)
+                } else {
+                    (side, fit) = ScarfLayout.fit(preferred: settings.knot, roomLeft: roomLeft,
+                                                  roomRight: roomRight, T: T)
+                }
                 style = ScarfStyle(colourway: cw.id, T: T, side: side, fit: fit)
+                overlay.fittedKnot = settings.knot
+                overlay.fittedSize = t.frame.size
             }
             overlay.update(frame: t.frame, colourway: cw, style: style)
 
