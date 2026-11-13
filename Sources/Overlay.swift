@@ -26,7 +26,11 @@ struct ScarfStyle: Equatable {
 /// The windows stay on screen for as long as the scarf exists; showing and hiding only fades
 /// their contents. That avoids macOS replaying its "new window" animation every time.
 final class ScarfOverlay {
-    let targetID: CGWindowID
+    /// The window wearing the scarf. It can change hands: switching tabs in a tabbed window
+    /// swaps in a different window at the same place, and the scarf moves across with it.
+    private(set) var targetID: CGWindowID
+    /// The app that owns the window.
+    var pid: pid_t = 0
 
     private final class Piece {
         let window: OverlayWindow
@@ -64,7 +68,7 @@ final class ScarfOverlay {
     private var placements: [Placement] = []
     private(set) var style: ScarfStyle?
     private var builtSize: CGSize = .zero
-    private var targetFrame: CGRect = .zero
+    private(set) var targetFrame: CGRect = .zero
     private var colourway: Colourway = Colourways.rosehip
     private var rendering = false
     private var needsRender = false
@@ -78,6 +82,11 @@ final class ScarfOverlay {
 
     init(targetID: CGWindowID) {
         self.targetID = targetID
+    }
+
+    /// Hand the scarf to another window, without re-knitting it. The caller re-stacks it.
+    func moveTo(_ id: CGWindowID) {
+        targetID = id
     }
 
     /// The window numbers of this scarf's pieces.
@@ -188,7 +197,14 @@ final class ScarfOverlay {
             // invisible until their pictures are ready.
             hasContents = false
             pieces = placements.map { _ in Piece() }
-            if isLifted { for piece in pieces { piece.window.level = ScarfOverlay.liftedLevel } }
+            if isLifted {
+                // While lifted, nothing puts the new pieces on screen (they're only re-stacked
+                // once the scarf settles), so do it here, at the lifted level.
+                for piece in pieces {
+                    piece.window.level = ScarfOverlay.liftedLevel
+                    piece.window.orderFrontRegardless()
+                }
+            }
         }
     }
 
